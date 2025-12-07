@@ -1,8 +1,18 @@
+## [0.3.0] - 2025-12-07
+
+### 🚀 Features
+
+- Simplify app context initialization and improve test logging
+- Add Glob function to Env interfaces and improve filesystem testing
 ## [0.2.1] - 2025-11-16
 
 ### 🐛 Bug Fixes
 
 - Remove redundant error logging in AtomicWriteFile
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v0.2.1
 ## [0.2.0] - 2025-11-10
 
 ### 🚀 Features
