@@ -205,6 +205,10 @@ func (o *OsEnv) Symlink(oldname string, newname string) error {
 	return os.Symlink(oldPath, newPath)
 }
 
+func (o *OsEnv) Glob(pattern string) ([]string, error) {
+	return filepath.Glob(pattern)
+}
+
 func (o *OsEnv) AtomicWriteFile(rel string, data []byte, perm os.FileMode) error {
 	path := o.ExpandPath(rel)
 

@@ -2,10 +2,9 @@ package toolkit
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
-
-	"log/slog"
 )
 
 // FileSystem defines the contract for filesystem operations.
@@ -34,6 +33,8 @@ type FileSystem interface {
 	ReadDir(rel string) ([]os.DirEntry, error)
 
 	Symlink(oldname, newname string) error
+
+	Glob(pattern string) ([]string, error)
 
 	AtomicWriteFile(rel string, data []byte, perm os.FileMode) error
 }
@@ -364,6 +365,38 @@ func ReadDir(ctx context.Context, rel string) ([]os.DirEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// Glob returns the names of all files matching the pattern using the Env stored
+// in ctx. This enables glob patterns to work within sandboxed test environments.
+// The pattern is expanded (handling ~) and then glob-matched. For TestEnv, results
+// are restricted to within the jail boundary.
+func Glob(ctx context.Context, pattern string) ([]string, error) {
+	env := EnvFromContext(ctx)
+	lg := getTookitLogger(ctx)
+
+	matches, err := env.Glob(pattern)
+	if err != nil {
+		lg.Log(
+			ctx,
+			slog.LevelError,
+			"Glob failed",
+			slog.String("envType", env.Name()),
+			slog.String("pattern", pattern),
+			slog.Any("error", err),
+		)
+		return nil, err
+	}
+
+	lg.Log(
+		ctx,
+		slog.LevelDebug,
+		"Glob success",
+		slog.String("envType", env.Name()),
+		slog.String("pattern", pattern),
+		slog.Int("count", len(matches)),
+	)
+	return matches, nil
 }
 
 // Symlink creates a symbolic link pointing to oldname named newname.

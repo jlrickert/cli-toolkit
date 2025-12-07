@@ -514,6 +514,51 @@ func (o *TestEnv) Symlink(oldname string, newname string) error {
 	return os.Symlink(oldPath, newPath)
 }
 
+func (m *TestEnv) Glob(pattern string) ([]string, error) {
+	// Resolve the pattern relative to jail
+	expanded := m.ExpandPath(pattern)
+	var globPattern string
+	if filepath.IsAbs(expanded) {
+		globPattern = filepath.Join(m.jail, expanded)
+	} else {
+		wd, err := m.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		globPattern = filepath.Join(m.jail, wd, expanded)
+	}
+
+	// Perform glob on the jailed path
+	matches, err := filepath.Glob(globPattern)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove jail prefix from results and filter to ensure they're in jail
+	var results []string
+	wd, _ := m.Getwd()
+	for _, match := range matches {
+		if !IsInJail(m.jail, match) {
+			continue
+		}
+		// Get the path relative to jail
+		jailedPath := RemoveJailPrefix(m.jail, match)
+		// If the original pattern was relative, return path relative to cwd
+		if !filepath.IsAbs(expanded) {
+			// Return path relative to the working directory
+			relPath, err := filepath.Rel(wd, jailedPath)
+			if err == nil {
+				results = append(results, relPath)
+			} else {
+				results = append(results, jailedPath)
+			}
+		} else {
+			results = append(results, jailedPath)
+		}
+	}
+	return results, nil
+}
+
 func (m *TestEnv) AtomicWriteFile(rel string, data []byte, perm os.FileMode) error {
 	resolved, err := m.ResolvePath(rel, false)
 	if err != nil {
