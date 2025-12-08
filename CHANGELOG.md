@@ -1,9 +1,18 @@
+## [0.4.0] - 2025-12-08
+
+### 🚀 Features
+
+- Implement GetTempDir and ensure ExpandPath usage in OsEnv
 ## [0.3.0] - 2025-12-07
 
 ### 🚀 Features
 
 - Simplify app context initialization and improve test logging
 - Add Glob function to Env interfaces and improve filesystem testing
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v0.3.0
 ## [0.2.1] - 2025-11-16
 
 ### 🐛 Bug Fixes
