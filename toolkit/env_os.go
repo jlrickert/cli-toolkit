@@ -135,18 +135,21 @@ func (o *OsEnv) ExpandPath(p string) string {
 
 // ReadFile reads the named file from the real filesystem.
 func (o *OsEnv) ReadFile(name string) ([]byte, error) {
+	name = o.ExpandPath(name)
 	return os.ReadFile(name)
 }
 
 // WriteFile writes data to a file on the real filesystem with the given
 // permissions.
 func (o *OsEnv) WriteFile(name string, data []byte, perm os.FileMode) error {
+	name = o.ExpandPath(name)
 	return os.WriteFile(name, data, perm)
 }
 
 // Remove removes the named file or directory. If all is true all items in the
 // path are removed.
 func (o *OsEnv) Remove(path string, all bool) error {
+	path = o.ExpandPath(path)
 	if all {
 		return os.RemoveAll(path)
 	}
@@ -155,11 +158,14 @@ func (o *OsEnv) Remove(path string, all bool) error {
 
 // Rename renames (moves) a file or directory.
 func (o *OsEnv) Rename(src, dst string) error {
+	src = o.ExpandPath(src)
+	dst = o.ExpandPath(dst)
 	return os.Rename(src, dst)
 }
 
 // Mkdir creates a directory. If all is true MkdirAll is used.
 func (o *OsEnv) Mkdir(path string, perm os.FileMode, all bool) error {
+	path = o.ExpandPath(path)
 	if all {
 		return os.MkdirAll(path, perm)
 	}
@@ -167,6 +173,7 @@ func (o *OsEnv) Mkdir(path string, perm os.FileMode, all bool) error {
 }
 
 func (o *OsEnv) ReadDir(rel string) ([]os.DirEntry, error) {
+	rel = o.ExpandPath(rel)
 	return os.ReadDir(rel)
 }
 
@@ -206,6 +213,7 @@ func (o *OsEnv) Symlink(oldname string, newname string) error {
 }
 
 func (o *OsEnv) Glob(pattern string) ([]string, error) {
+	pattern = o.ExpandPath(pattern)
 	return filepath.Glob(pattern)
 }
 

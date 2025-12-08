@@ -399,6 +399,11 @@ func Glob(ctx context.Context, pattern string) ([]string, error) {
 	return matches, nil
 }
 
+func GetTempDir(ctx context.Context) string {
+	env := EnvFromContext(ctx)
+	return env.GetTempDir()
+}
+
 // Symlink creates a symbolic link pointing to oldname named newname.
 // The oldname and newname are expanded using ExpandPath with the Env
 // from ctx before creating the symlink. If symlink creation fails an
