@@ -4,14 +4,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	proj "github.com/jlrickert/cli-toolkit/appctx"
+	proj "github.com/jlrickert/cli-toolkit/apppaths"
 	testutils "github.com/jlrickert/cli-toolkit/sandbox"
 	"github.com/jlrickert/cli-toolkit/toolkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewAppContextManualRootDefaults(t *testing.T) {
+func TestNewAppPathsManualRootDefaults(t *testing.T) {
 	t.Parallel()
 
 	// Create fixture and populate with the example repo under "repo".
@@ -24,7 +24,7 @@ func TestNewAppContextManualRootDefaults(t *testing.T) {
 	// requested absolute path.
 	appname := "myapp"
 	manualRoot := filepath.FromSlash("/home/testuser/repo/basic")
-	p, err := proj.NewAppContext(f.Runtime(), manualRoot, appname)
+	p, err := proj.NewAppPaths(f.Runtime(), manualRoot, appname)
 	require.NoError(t, err)
 
 	// Root should be exactly what we set.

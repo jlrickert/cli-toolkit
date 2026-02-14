@@ -9,10 +9,10 @@ import (
 	"github.com/jlrickert/cli-toolkit/toolkit"
 )
 
-// AppContext holds paths and configuration roots for a repository-backed app
+// AppPaths holds paths and configuration roots for a repository-backed app
 // context. Root is the repository root. Other roots default to platform
 // user-scoped locations when not provided.
-type AppContext struct {
+type AppPaths struct {
 	Appname string
 
 	// Root is the path to the root of the context.
@@ -34,7 +34,7 @@ type AppContext struct {
 	LocalConfigRoot string
 }
 
-func NewGitAppContext(ctx context.Context, rt *toolkit.Runtime, appname string) (*AppContext, error) {
+func NewGitAppPaths(ctx context.Context, rt *toolkit.Runtime, appname string) (*AppPaths, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
@@ -43,11 +43,11 @@ func NewGitAppContext(ctx context.Context, rt *toolkit.Runtime, appname string) 
 		return nil, err
 	}
 	root := FindGitRoot(ctx, rt, cwd)
-	aCtx, err := NewAppContext(rt, root, appname)
+	aCtx, err := NewAppPaths(rt, root, appname)
 	return aCtx, err
 }
 
-// NewAppContext constructs a app context and fills missing roots using platform
+// NewAppPaths constructs app paths and fills missing roots using platform
 // defaults derived from the provided context.
 //
 // Behavior:
@@ -55,11 +55,11 @@ func NewGitAppContext(ctx context.Context, rt *toolkit.Runtime, appname string) 
 //   - If Root is not set it is inferred from Env.Getwd().
 //   - ConfigRoot, DataRoot, StateRoot and CacheRoot use the corresponding
 //     user-scoped platform paths and are joined with DefaultAppName.
-func NewAppContext(rt *toolkit.Runtime, root, appname string) (*AppContext, error) {
+func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
-	p := &AppContext{Appname: appname}
+	p := &AppPaths{Appname: appname}
 
 	p.Root = filepath.Clean(root)
 
