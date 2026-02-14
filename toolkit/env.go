@@ -1,7 +1,6 @@
 package toolkit
 
 import (
-	"context"
 	"maps"
 	"os"
 	"sort"
@@ -15,8 +14,6 @@ import (
 // The interface mirrors common environment operations so callers can inject a
 // test implementation for unit tests without touching the real process env.
 type Env interface {
-	FileSystem
-
 	// Name of the environment
 	Name() string
 
@@ -57,15 +54,17 @@ type Env interface {
 
 	// Setwd sets the working directory for this Env. For OsEnv this may change
 	// the process working directory; for TestEnv it updates the stored PWD.
-	Setwd(dir string)
+	Setwd(dir string) error
 
 	// GetTempDir returns an appropriate temp directory for this Env. For OsEnv
 	// this delegates to os.TempDir(); TestEnv provides testable fallbacks.
 	GetTempDir() string
+}
 
-	// ResolvePath resolves that path. Follows symlinks and returns the absolute
-	// path
-	ResolvePath(rel string, follow bool) (string, error)
+// EnvCloner is implemented by environments that can create a deep-copy clone
+// suitable for isolated mutation in concurrent runs.
+type EnvCloner interface {
+	CloneEnv() Env
 }
 
 // GetDefault returns the value of key from env when present and non-empty.
@@ -84,8 +83,10 @@ func GetDefault(env Env, key, other string) string {
 
 // ExpandEnv expands $var or ${var} in s using the Env stored in ctx. If no
 // Env is present in the context the real OS environment is used via OsEnv.
-func ExpandEnv(ctx context.Context, s string) string {
-	env := EnvFromContext(ctx)
+func ExpandEnv(env Env, s string) string {
+	if env == nil {
+		env = &OsEnv{}
+	}
 	return os.Expand(s, env.Get)
 }
 
@@ -97,8 +98,10 @@ func ExpandEnv(ctx context.Context, s string) string {
 // implementations the function attempts to use common helper methods (Environ
 // or Keys) if available. If enumeration is not possible a short message is
 // returned indicating that limitation.
-func DumpEnv(ctx context.Context) string {
-	env := EnvFromContext(ctx)
+func DumpEnv(env Env) string {
+	if env == nil {
+		env = &OsEnv{}
+	}
 	entries := make(map[string]string)
 
 	// Special-case TestEnv to expose its map and dedicated HOME/USER fields.
@@ -150,28 +153,4 @@ func DumpEnv(ctx context.Context) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
-}
-
-type envCtxKey int
-
-var (
-	ctxEnvKey  envCtxKey
-	defaultEnv = &OsEnv{}
-)
-
-// WithEnv returns a copy of ctx that carries env. Use this to inject a test
-// environment into code under test.
-func WithEnv(ctx context.Context, env Env) context.Context {
-	return context.WithValue(ctx, ctxEnvKey, env)
-}
-
-// EnvFromContext returns the Env stored in ctx. If ctx is nil or does not
-// contain an Env, the real OsEnv is returned.
-func EnvFromContext(ctx context.Context) Env {
-	if v := ctx.Value(ctxEnvKey); v != nil {
-		if env, ok := v.(Env); ok && env != nil {
-			return env
-		}
-	}
-	return defaultEnv
 }

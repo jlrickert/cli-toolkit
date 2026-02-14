@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	tu "github.com/jlrickert/cli-toolkit/sandbox"
-	"github.com/jlrickert/cli-toolkit/toolkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +24,7 @@ func TestFixture_WithEnvironment(t *testing.T) {
 		tu.WithEnv("LOG_LEVEL", "info"),
 	)
 
-	env := toolkit.EnvFromContext(sandbox.Context())
+	env := sandbox.Runtime().Env
 	assert.Equal(t, "true", env.Get("DEBUG"))
 	assert.Equal(t, "info", env.Get("LOG_LEVEL"))
 }
@@ -63,7 +62,8 @@ func TestSandbox_ReadWriteStaysInJail(t *testing.T) {
 	assert.Equal(t, testData, readData)
 
 	// Verify the file path is within the jail
-	absPath := sandbox.AbsPath(testFile)
+	absPath, err := sandbox.AbsPath(testFile)
+	require.NoError(t, err)
 	jailAbs, _ := filepath.Abs(sandbox.GetJail())
 	relPath, err := filepath.Rel(jailAbs, absPath)
 	assert.NoError(t, err)
@@ -72,7 +72,8 @@ func TestSandbox_ReadWriteStaysInJail(t *testing.T) {
 
 	// Verify we cannot escape the jail using relative paths
 	escapePath := "../outside.txt"
-	resolvedPath := sandbox.ResolvePath(escapePath)
+	resolvedPath, err := sandbox.ResolvePath(escapePath)
+	require.NoError(t, err)
 	relPath, err = filepath.Rel(jailAbs, resolvedPath)
 	assert.NoError(t, err)
 	assert.False(t, filepath.IsAbs(relPath) || relPath == "..",
@@ -81,7 +82,8 @@ func TestSandbox_ReadWriteStaysInJail(t *testing.T) {
 
 	// Verify absolute paths outside jail are contained
 	outsidePath := "/etc/passwd"
-	containedPath := sandbox.ResolvePath(outsidePath)
+	containedPath, err := sandbox.ResolvePath(outsidePath)
+	require.NoError(t, err)
 	relPath, err = filepath.Rel(jailAbs, containedPath)
 	assert.NoError(t, err)
 	assert.False(t, filepath.IsAbs(relPath) || relPath == "..",
@@ -103,8 +105,9 @@ func TestSandbox_JailIsolation(t *testing.T) {
 	sandbox.MustWriteFile(testFile, testData, 0o644)
 
 	// Verify it exists in the jail
-	testFilepath := sandbox.ResolvePath(testFile)
-	_, err := os.Stat(filepath.Join(jailPath, testFilepath))
+	testFilepath, err := sandbox.ResolvePath(testFile)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(jailPath, testFilepath))
 	require.NoError(t, err)
 
 	// Verify it does not exist outside the jail

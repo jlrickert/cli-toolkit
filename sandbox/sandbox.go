@@ -19,15 +19,13 @@ import (
 // SandboxOption is a function used to modify a Sandbox during construction.
 type SandboxOption func(f *Sandbox)
 
-// Sandbox bundles common test setup used by package tests. It contains a
-// testing.T, a context carrying a test logger, a test env, a test clock, a
-// hasher, and a temporary "jail" directory that acts as an isolated
-// filesystem.
+// Sandbox bundles common test setup used by package tests.
 type Sandbox struct {
 	t *testing.T
 
 	data embed.FS
 	ctx  context.Context
+	rt   *toolkit.Runtime
 
 	logger *mylog.TestHandler
 	env    *toolkit.TestEnv
@@ -37,19 +35,14 @@ type Sandbox struct {
 
 // SandboxOptions holds optional settings provided to NewSandbox.
 type SandboxOptions struct {
-	// Data is an embedded filesystem containing test fixtures.
 	Data embed.FS
-	// Home is the home directory for the user. If empty defaults to
-	// /home/$USER. If the user is root the default is /.root.
 	Home string
-	// User is the username. Defaults to testuser.
 	User string
 }
 
-// NewSandbox constructs a Sandbox and applies given options. Cleanup is
-// registered with t.Cleanup so callers do not need to call a cleanup
-// function.
+// NewSandbox constructs a Sandbox and applies given options.
 func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *Sandbox {
+	t.Helper()
 	jail := t.TempDir()
 
 	var home string
@@ -63,35 +56,45 @@ func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *S
 	env := toolkit.NewTestEnv(jail, home, user)
 
 	lg, handler := mylog.NewTestLogger(t, mylog.ParseLevel("debug"))
-	clk := clock.NewTestClock(
-		time.Date(2025, 10, 15, 12, 30, 0, 0, time.UTC))
+	clk := clock.NewTestClock(time.Date(2025, 10, 15, 12, 30, 0, 0, time.UTC))
 	hasher := &toolkit.MD5Hasher{}
+	stream := toolkit.DefaultStream()
 
-	// Populate common temp env vars.
+	rt, err := toolkit.NewRuntime(
+		toolkit.WithRuntimeEnv(env),
+		toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
+		toolkit.WithRuntimeClock(clk),
+		toolkit.WithRuntimeLogger(lg),
+		toolkit.WithRuntimeStream(stream),
+		toolkit.WithRuntimeHasher(hasher),
+		toolkit.WithRuntimeJail(jail),
+	)
+	if err != nil {
+		t.Fatalf("NewSandbox: runtime init failed: %v", err)
+	}
+
 	ctx := t.Context()
 	ctx = mylog.WithLogger(ctx, lg)
-	ctx = toolkit.WithEnv(ctx, env)
 	ctx = clock.WithClock(ctx, clk)
 	ctx = toolkit.WithHasher(ctx, hasher)
+	ctx = toolkit.WithStream(ctx, stream)
 
 	f := &Sandbox{
 		t:      t,
 		ctx:    ctx,
 		data:   data,
+		rt:     rt,
 		logger: handler,
 		hasher: hasher,
 		env:    env,
 		clock:  clk,
 	}
 
-	// Apply options.
 	for _, opt := range opts {
 		opt(f)
 	}
 
-	// Register cleanup (reserved for future teardown).
 	t.Cleanup(func() { f.cleanup() })
-
 	return f
 }
 
@@ -113,13 +116,17 @@ func WithEnv(key, val string) SandboxOption {
 func WithWd(rel string) SandboxOption {
 	return func(sandbox *Sandbox) {
 		sandbox.t.Helper()
-		path := sandbox.ResolvePath(rel)
-		sandbox.env.Setwd(path)
+		path, err := sandbox.ResolvePath(rel)
+		if err != nil {
+			sandbox.t.Fatalf("WithWd: resolve %q failed: %v", rel, err)
+		}
+		if err := sandbox.env.Setwd(path); err != nil {
+			sandbox.t.Fatalf("WithWd: setwd %q failed: %v", path, err)
+		}
 	}
 }
 
-// WithClock returns a SandboxOption that sets the test clock to the
-// provided time.
+// WithClock returns a SandboxOption that sets the test clock to the provided time.
 func WithClock(t0 time.Time) SandboxOption {
 	return func(f *Sandbox) {
 		f.t.Helper()
@@ -130,8 +137,7 @@ func WithClock(t0 time.Time) SandboxOption {
 	}
 }
 
-// WithEnvMap returns a SandboxOption that seeds multiple environment
-// variables from a map.
+// WithEnvMap returns a SandboxOption that seeds multiple environment variables.
 func WithEnvMap(m map[string]string) SandboxOption {
 	return func(f *Sandbox) {
 		f.t.Helper()
@@ -143,30 +149,32 @@ func WithEnvMap(m map[string]string) SandboxOption {
 	}
 }
 
-// WithFixture returns a SandboxOption that copies a fixture directory from
-// the embedded package data into the provided path within the sandbox Jail.
-// Example fixtures are "empty" or "example".
+// WithFixture copies an embedded fixture directory into the sandbox jail.
 func WithFixture(fixture string, path string) SandboxOption {
 	return func(f *Sandbox) {
 		f.t.Helper()
 
-		// Source is the embedded package data directory.
 		src := filepath.Join("data", fixture)
 		if _, err := iofs.Stat(f.data, src); err != nil {
 			f.t.Fatalf("WithFixture: source %s not found: %v", src, err)
 		}
 
-		p, _ := toolkit.ResolvePath(f.Context(), path, false)
+		p, err := f.ResolvePath(path)
+		if err != nil {
+			f.t.Fatalf("WithFixture: resolve %s failed: %v", path, err)
+		}
 		dst := filepath.Join(f.GetJail(), p)
 		if err := copyEmbedDir(f.data, src, dst); err != nil {
-			f.t.Fatalf("WithFixture: copy %s -> %s failed: %v",
-				src, dst, err)
+			f.t.Fatalf("WithFixture: copy %s -> %s failed: %v", src, dst, err)
 		}
 	}
 }
 
 func (sandbox *Sandbox) GetJail() string {
-	return sandbox.env.GetJail()
+	if sandbox.rt == nil {
+		return ""
+	}
+	return sandbox.rt.Jail
 }
 
 // Context returns the sandbox context.
@@ -174,27 +182,29 @@ func (sandbox *Sandbox) Context() context.Context {
 	return sandbox.ctx
 }
 
-// AbsPath returns an absolute path. When the sandbox Jail is set and rel is
-// relative the path is made relative to the Jail. Otherwise the function
-// returns the absolute form of rel.
-func (sandbox *Sandbox) AbsPath(rel string) string {
-	sandbox.t.Helper()
-	return toolkit.AbsPath(sandbox.Context(), rel)
+// Runtime returns the sandbox runtime.
+func (sandbox *Sandbox) Runtime() *toolkit.Runtime {
+	return sandbox.rt
 }
 
-// ReadFile reads a file located under the sandbox Jail. The path is
-// interpreted relative to the Jail root.
+// AbsPath returns a runtime absolute path.
+func (sandbox *Sandbox) AbsPath(rel string) (string, error) {
+	sandbox.t.Helper()
+	return sandbox.rt.AbsPath(rel)
+}
+
+// ReadFile reads a file located under the sandbox jail.
 func (sandbox *Sandbox) ReadFile(rel string) ([]byte, error) {
 	sandbox.t.Helper()
-	return toolkit.ReadFile(sandbox.Context(), rel)
+	return sandbox.rt.ReadFile(rel)
 }
 
-// MustReadFile reads a file under the Jail and fails the test on error.
+// MustReadFile reads a file under the jail and fails the test on error.
 func (sandbox *Sandbox) MustReadFile(rel string) []byte {
 	sandbox.t.Helper()
 	b, err := sandbox.ReadFile(rel)
 	if err != nil {
-		sandbox.t.Fatalf("MustReadJailFile %s failed: %v", rel, err)
+		sandbox.t.Fatalf("MustReadFile %s failed: %v", rel, err)
 	}
 	return b
 }
@@ -204,45 +214,37 @@ func (sandbox *Sandbox) AtomicWriteFile(rel string, data []byte, perm os.FileMod
 	if sandbox.GetJail() == "" {
 		return fmt.Errorf("no jail set")
 	}
-	return toolkit.AtomicWriteFile(sandbox.Context(), rel, data, perm)
+	return sandbox.rt.AtomicWriteFile(rel, data, perm)
 }
 
-// WriteFile writes data to a path under the sandbox Jail, creating
-// parent directories as needed. perm is applied to the file.
+// WriteFile writes data to a path under the sandbox jail.
 func (sandbox *Sandbox) WriteFile(rel string, data []byte, perm os.FileMode) error {
 	sandbox.t.Helper()
-	return toolkit.WriteFile(sandbox.Context(), rel, data, perm)
+	return sandbox.rt.WriteFile(rel, data, perm)
 }
 
-// MustWriteFile writes data under the Jail and fails the test on error.
+// MustWriteFile writes data under the jail and fails the test on error.
 func (sandbox *Sandbox) MustWriteFile(path string, data []byte, perm os.FileMode) {
 	sandbox.t.Helper()
 	if err := sandbox.WriteFile(path, data, perm); err != nil {
-		sandbox.t.Fatalf("MustWriteJailFile %s failed: %v", path, err)
+		sandbox.t.Fatalf("MustWriteFile %s failed: %v", path, err)
 	}
 }
 
 func (sandbox *Sandbox) Mkdir(rel string, all bool) error {
 	sandbox.t.Helper()
-	return sandbox.env.Mkdir(rel, 0o755, all)
+	return sandbox.rt.Mkdir(rel, 0o755, all)
 }
 
-// ResolvePath returns an absolute path with symlinks resolved, ensuring the
-// path remains within the sandbox Jail. It expands the path and evaluates any
-// symbolic links before confining it to the jail boundary.
-func (sandbox *Sandbox) ResolvePath(rel string) string {
+// ResolvePath returns an absolute runtime path with optional symlink resolution.
+func (sandbox *Sandbox) ResolvePath(rel string) (string, error) {
 	sandbox.t.Helper()
-	// TODO: handle the error
-	path, _ := toolkit.ResolvePath(sandbox.Context(), rel, false)
-	return path
+	return sandbox.rt.ResolvePath(rel, false)
 }
 
-func (sandbox *Sandbox) cleanup() {
-}
+func (sandbox *Sandbox) cleanup() {}
 
-// DumpJailTree logs a tree of files and directories rooted at the sandbox's
-// Jail. Only directories with no children and files are logged. maxDepth
-// limits recursion depth; maxDepth <= 0 means unlimited depth.
+// DumpJailTree logs a tree of files and directories rooted at the sandbox jail.
 func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 	sandbox.t.Helper()
 	if sandbox.GetJail() == "" {
@@ -252,7 +254,6 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 
 	sandbox.t.Logf("Jail tree: %s", sandbox.GetJail())
 
-	// First pass: collect all paths and determine which dirs have children
 	type pathInfo struct {
 		path  string
 		isDir bool
@@ -261,8 +262,7 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 	var paths []pathInfo
 	hasDirChild := make(map[string]bool)
 
-	err := filepath.WalkDir(sandbox.GetJail(), func(p string, d iofs.DirEntry,
-		err error) error {
+	err := filepath.WalkDir(sandbox.GetJail(), func(p string, d iofs.DirEntry, err error) error {
 		if err != nil {
 			sandbox.t.Logf("  error: %v", err)
 			return nil
@@ -272,11 +272,15 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 		if p == "." {
 			path = "/"
 		} else {
-			// TODO: Handle the error
-			path, _ = toolkit.ResolvePath(sandbox.Context(), p, false)
+			runtimePath := toolkit.RemoveJailPrefix(sandbox.GetJail(), p)
+			resolved, err := sandbox.rt.ResolvePath(runtimePath, false)
+			if err != nil {
+				sandbox.t.Logf("  resolve error for %s: %v", p, err)
+				return nil
+			}
+			path = resolved
 		}
 
-		// Apply depth limit when requested.
 		if maxDepth > 0 {
 			depth := strings.Count(path, string(os.PathSeparator)) + 1
 			if depth > maxDepth {
@@ -289,17 +293,9 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 
 		if d.IsDir() {
 			depth := strings.Count(path, string(os.PathSeparator)) + 1
-			paths = append(paths, pathInfo{
-				path:  path,
-				isDir: true,
-				depth: depth,
-			})
+			paths = append(paths, pathInfo{path: path, isDir: true, depth: depth})
 		} else {
-			paths = append(paths, pathInfo{
-				path:  path,
-				isDir: false,
-			})
-			// Mark parent as having children
+			paths = append(paths, pathInfo{path: path, isDir: false})
 			parent := filepath.Dir(path)
 			hasDirChild[parent] = true
 		}
@@ -307,13 +303,10 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 		return nil
 	})
 
-	// Second pass: log only files and leaf directories
 	for _, pi := range paths {
 		if !pi.isDir {
-			// Always log files
 			sandbox.t.Logf("  %s", pi.path)
 		} else if !hasDirChild[pi.path] {
-			// Log directories with no children
 			sandbox.t.Logf("  %s/", pi.path)
 		}
 	}
@@ -321,6 +314,17 @@ func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
 	if err != nil {
 		sandbox.t.Logf("DumpJailTree walk error: %v", err)
 	}
+}
+
+// DumpFileContent reads and logs the content of a file in the sandbox.
+func (sandbox *Sandbox) DumpFileContent(rel string) {
+	sandbox.t.Helper()
+	content, err := sandbox.ReadFile(rel)
+	if err != nil {
+		sandbox.t.Logf("DumpFileContent %s failed: %v", rel, err)
+		return
+	}
+	sandbox.t.Logf("File content: %s\n%s", rel, string(content))
 }
 
 // Advance advances the sandbox test clock by the given duration.
@@ -336,17 +340,19 @@ func (sandbox *Sandbox) Now() time.Time {
 }
 
 // Getwd returns the sandbox working directory.
-func (sandbox *Sandbox) Getwd() string {
+func (sandbox *Sandbox) Getwd() (string, error) {
 	sandbox.t.Helper()
-	wd, _ := sandbox.env.Getwd()
-	return wd
+	return sandbox.env.Getwd()
 }
 
 // Setwd sets the sandbox working directory.
-func (sandbox *Sandbox) Setwd(dir string) {
+func (sandbox *Sandbox) Setwd(dir string) error {
 	sandbox.t.Helper()
-	path := sandbox.ResolvePath(dir)
-	sandbox.env.Setwd(path)
+	path, err := sandbox.ResolvePath(dir)
+	if err != nil {
+		return err
+	}
+	return sandbox.env.Setwd(path)
 }
 
 // GetHome returns the sandbox home.
@@ -355,8 +361,7 @@ func (sandbox *Sandbox) GetHome() (string, error) {
 	return sandbox.env.GetHome()
 }
 
-// copyEmbedDir recursively copies a directory tree from an embedded FS
-// to dst.
+// copyEmbedDir recursively copies a directory tree from an embedded FS to dst.
 func copyEmbedDir(fsys embed.FS, src, dst string) error {
 	entries, err := iofs.ReadDir(fsys, src)
 	if err != nil {

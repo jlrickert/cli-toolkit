@@ -59,14 +59,14 @@ func NewTestEnv(jail, home, username string) *TestEnv {
 	m := &TestEnv{
 		jail: jail,
 		home: home,
-		user: username,
+		user: user,
 		data: make(map[string]string),
 	}
 
 	// Always expose HOME and USER through the map as well for callers that read
 	// via Get.
 	m.data["HOME"] = home
-	m.data["USER"] = username
+	m.data["USER"] = user
 	m.data["PWD"] = cwd
 
 	// Populate platform specific defaults so callers that query these keys get
@@ -169,8 +169,7 @@ func (m *TestEnv) Set(key string, value string) error {
 	case "USER":
 		return m.SetUser(value)
 	case "PWD":
-		m.Setwd(value)
-		return nil
+		return m.Setwd(value)
 	default:
 		if m.data == nil {
 			m.data = make(map[string]string)
@@ -305,12 +304,16 @@ func (m *TestEnv) Getwd() (string, error) {
 }
 
 // Setwd sets the TestEnv's PWD value to the provided directory.
-func (m *TestEnv) Setwd(dir string) {
+func (m *TestEnv) Setwd(dir string) error {
 	if m.data == nil {
 		m.data = make(map[string]string)
 	}
-	path, _ := m.ResolvePath(dir, false)
+	path, err := m.ResolvePath(dir, false)
+	if err != nil {
+		return err
+	}
 	m.data["PWD"] = path
+	return nil
 }
 
 // ReadFile reads the named file from the filesystem view held by this TestEnv.
@@ -502,10 +505,15 @@ func (m *TestEnv) Clone() *TestEnv {
 	}
 
 	return &TestEnv{
+		jail: m.jail,
 		home: m.home,
 		user: m.user,
 		data: dataCopy,
 	}
+}
+
+func (m *TestEnv) CloneEnv() Env {
+	return m.Clone()
 }
 
 func (o *TestEnv) Symlink(oldname string, newname string) error {

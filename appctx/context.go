@@ -34,14 +34,16 @@ type AppContext struct {
 	LocalConfigRoot string
 }
 
-func NewGitAppContext(ctx context.Context, appname string) (*AppContext, error) {
-	env := toolkit.EnvFromContext(ctx)
-	cwd, err := env.Getwd()
+func NewGitAppContext(ctx context.Context, rt *toolkit.Runtime, appname string) (*AppContext, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("runtime is nil")
+	}
+	cwd, err := rt.Env.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	root := FindGitRoot(ctx, cwd)
-	aCtx, err := NewAppContext(ctx, root, appname)
+	root := FindGitRoot(ctx, rt, cwd)
+	aCtx, err := NewAppContext(rt, root, appname)
 	return aCtx, err
 }
 
@@ -53,12 +55,15 @@ func NewGitAppContext(ctx context.Context, appname string) (*AppContext, error) 
 //   - If Root is not set it is inferred from Env.Getwd().
 //   - ConfigRoot, DataRoot, StateRoot and CacheRoot use the corresponding
 //     user-scoped platform paths and are joined with DefaultAppName.
-func NewAppContext(ctx context.Context, root, appname string) (*AppContext, error) {
+func NewAppContext(rt *toolkit.Runtime, root, appname string) (*AppContext, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("runtime is nil")
+	}
 	p := &AppContext{Appname: appname}
 
 	p.Root = filepath.Clean(root)
 
-	if path, err := toolkit.UserConfigPath(ctx); err != nil {
+	if path, err := toolkit.UserConfigPath(rt.Env); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user config path: %w",
 			os.ErrNotExist,
@@ -67,7 +72,7 @@ func NewAppContext(ctx context.Context, root, appname string) (*AppContext, erro
 		p.ConfigRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserDataPath(ctx); err != nil {
+	if path, err := toolkit.UserDataPath(rt.Env); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user data path: %w",
 			os.ErrNotExist,
@@ -76,7 +81,7 @@ func NewAppContext(ctx context.Context, root, appname string) (*AppContext, erro
 		p.DataRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserStatePath(ctx); err != nil {
+	if path, err := toolkit.UserStatePath(rt.Env); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user state root: %w",
 			os.ErrNotExist,
@@ -85,7 +90,7 @@ func NewAppContext(ctx context.Context, root, appname string) (*AppContext, erro
 		p.StateRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserCachePath(ctx); err != nil {
+	if path, err := toolkit.UserCachePath(rt.Env); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user cache root: %w",
 			os.ErrNotExist,

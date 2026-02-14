@@ -24,7 +24,7 @@ func TestNewAppContextManualRootDefaults(t *testing.T) {
 	// requested absolute path.
 	appname := "myapp"
 	manualRoot := filepath.FromSlash("/home/testuser/repo/basic")
-	p, err := proj.NewAppContext(f.Context(), manualRoot, appname)
+	p, err := proj.NewAppContext(f.Runtime(), manualRoot, appname)
 	require.NoError(t, err)
 
 	// Root should be exactly what we set.
@@ -32,22 +32,22 @@ func TestNewAppContextManualRootDefaults(t *testing.T) {
 
 	// Verify config/data/state/cache roots align with user-scoped paths joined
 	// with the application name.
-	ucfg, err := toolkit.UserConfigPath(f.Context())
+	ucfg, err := toolkit.UserConfigPath(f.Runtime().Env)
 	require.NoError(t, err)
 	expectedCfg := filepath.Join(ucfg, appname)
 	assert.Equal(t, expectedCfg, p.ConfigRoot)
 
-	udata, err := toolkit.UserDataPath(f.Context())
+	udata, err := toolkit.UserDataPath(f.Runtime().Env)
 	require.NoError(t, err)
 	expectedData := filepath.Join(udata, appname)
 	assert.Equal(t, expectedData, p.DataRoot)
 
-	ustate, err := toolkit.UserStatePath(f.Context())
+	ustate, err := toolkit.UserStatePath(f.Runtime().Env)
 	require.NoError(t, err)
 	expectedState := filepath.Join(ustate, appname)
 	assert.Equal(t, expectedState, p.StateRoot)
 
-	ucache, err := toolkit.UserCachePath(f.Context())
+	ucache, err := toolkit.UserCachePath(f.Runtime().Env)
 	require.NoError(t, err)
 	expectedCache := filepath.Join(ucache, appname)
 	assert.Equal(t, expectedCache, p.CacheRoot)

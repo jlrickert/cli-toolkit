@@ -8,6 +8,7 @@ test without touching global process state.
 ## Highlights
 
 - Testable environment via `TestEnv` that does not modify the OS env.
+- Explicit `Runtime` dependency container (Env, FS, clock, logger, stream, hasher).
 - Test clock via `TestClock` to deterministically control `Now()`.
 - File utilities for safe writes, path resolution, and test stdio.
 - Small logging helpers built on `log/slog` and a test handler.
@@ -25,9 +26,8 @@ test without touching global process state.
 Main package with filesystem, environment, and I/O utilities:
 
 - **Environment**: `Env` interface with `OsEnv` and `TestEnv` implementations.
-  Supports variable expansion, path handling, and home directory management.
-- **Filesystem**: Path resolution, atomic writes, directory operations with jail
-  (sandbox) support.
+- **Filesystem**: `FileSystem` interface with `OsFS` implementation.
+- **Runtime**: Explicit dependency wiring via `toolkit.Runtime`.
 - **Streams**: `Stream` struct modeling stdin/stdout/stderr with TTY and pipe
   detection.
 - **Utilities**: File operations, editor launching, environment inspection, user
@@ -84,9 +84,13 @@ go get github.com/jlrickert/cli-toolkit
 ```go
 env := toolkit.NewTestEnv("/tmp/jail", "/home/alice", "alice")
 _ = env.Set("FOO", "bar")
-ctx := toolkit.WithEnv(context.Background(), env)
+rt, _ := toolkit.NewRuntime(
+  toolkit.WithRuntimeEnv(env),
+  toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
+  toolkit.WithRuntimeJail("/tmp/jail"),
+)
 
-out := toolkit.ExpandEnv(ctx, "$FOO/baz")
+out := toolkit.ExpandEnv(rt.Env, "$FOO/baz")
 // out == "bar/baz" on unix-like platforms
 ```
 
@@ -104,10 +108,13 @@ tc.Advance(2 * time.Hour)
 ### Atomic file write
 
 ```go
-ctx := toolkit.WithEnv(context.Background(),
-  toolkit.NewTestEnv("", "", ""))
-err := toolkit.AtomicWriteFile(ctx, "/tmp/some/file.txt",
-  []byte("data"), 0644)
+env := toolkit.NewTestEnv("/tmp/jail", "", "")
+rt, _ := toolkit.NewRuntime(
+  toolkit.WithRuntimeEnv(env),
+  toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
+  toolkit.WithRuntimeJail("/tmp/jail"),
+)
+err := rt.AtomicWriteFile("/tmp/some/file.txt", []byte("data"), 0644)
 if err != nil {
     // handle
 }
@@ -124,9 +131,8 @@ ctx := mylog.WithLogger(context.Background(), lg)
 ### App Context helper
 
 ```go
-aCtx, err := appctx.NewAppContext(ctx, "myapp",
-  aCtx.WithRoot("/path/to/repo"))
-cfgRoot, _ := p.ConfigRoot(ctx)
+aCtx, err := appctx.NewAppContext(rt, "/path/to/repo", "myapp")
+cfgRoot := aCtx.ConfigRoot
 // cfgRoot == <user-config-dir>/myapp
 ```
 
@@ -136,9 +142,8 @@ cfgRoot, _ := p.ConfigRoot(ctx)
 sb := sandbox.NewSandbox(t, nil,
   sandbox.WithClock(time.Now()),
   sandbox.WithEnv("DEBUG", "true"))
-ctx := sb.Context()
 sb.MustWriteFile("config.txt", []byte("data"), 0644)
-// Use ctx and sb in test
+// Use sb.Runtime() and sb in test
 ```
 
 ## Testing
@@ -171,8 +176,7 @@ with a short description and tests for new behavior.
 - The library aims to be small and easy to audit. Tests avoid touching real OS
   state by using `TestEnv` and `TestClock`.
 - See repository files for detailed behavior and examples.
-- All packages are designed for context injection to enable testable,
-  deterministic code.
+- Runtime dependencies are passed explicitly via `toolkit.Runtime`.
 
 ## License
 

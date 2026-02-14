@@ -11,13 +11,10 @@ import (
 	"github.com/jlrickert/cli-toolkit/toolkit"
 )
 
-// Runner is a function signature for executing code within an isolated
-// test environment. It receives a context, standard I/O streams, and
-// command-line arguments, returning an error on failure.
-type Runner func(ctx context.Context, stream *toolkit.Stream) (int, error)
+// Runner executes a unit of work using explicit runtime dependencies.
+type Runner func(ctx context.Context, rt *toolkit.Runtime) (int, error)
 
-// ProcessResult holds the outcome of process execution including any
-// error, exit code, and captured stdout and stderr output.
+// ProcessResult holds the outcome of process execution.
 type ProcessResult struct {
 	Err      error
 	ExitCode int
@@ -25,54 +22,42 @@ type ProcessResult struct {
 	Stderr   []byte
 }
 
-// Process manages execution of a Runner function with configurable I/O
-// streams and piping support. It allows tests to run functions in
-// isolation with piped input/output between multiple processes.
+// Process manages execution of a Runner with configurable streams.
 type Process struct {
 	args  []string
 	isTTY bool
 
-	// runner to execute
 	runner Runner
 
-	// I/O streams
 	in  io.Reader
 	out io.Writer
 	err io.Writer
 
-	// Pipes for stdout and stderr
 	stdoutPipe *io.PipeReader
 	stdoutW    *io.PipeWriter
 	stderrPipe *io.PipeReader
 	stderrW    *io.PipeWriter
 
-	// Stdin pipe for continuous writing
 	stdinPipe *io.PipeReader
 	stdinW    *io.PipeWriter
 
-	// Capture buffers
 	outBuf *bytes.Buffer
 	errBuf *bytes.Buffer
 
 	mu sync.Mutex
 }
 
-// NewProcess constructs a Process bound to a Runner function with the
-// specified TTY mode. The context parameter is reserved for future use.
+// NewProcess constructs a Process bound to a Runner function.
 func NewProcess(fn Runner, isTTY bool) *Process {
-	return &Process{
-		runner: fn,
-		isTTY:  isTTY,
-	}
+	return &Process{runner: fn, isTTY: isTTY}
 }
 
-// NewProducer constructs a Process that emits the provided byte buffer
-// to stdout. It is useful for testing stages that consume input.
+// NewProducer constructs a Process that emits the provided lines to stdout.
 func NewProducer(interval time.Duration, lines []string) *Process {
-	runner := func(ctx context.Context, s *toolkit.Stream) (int, error) {
+	runner := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
+		s := rt.Stream
 		for _, l := range lines {
 			fmt.Fprintln(s.Out, l)
-			// Small pause to exercise concurrent piping behavior.
 			time.Sleep(interval)
 		}
 		return 0, nil
@@ -81,8 +66,7 @@ func NewProducer(interval time.Duration, lines []string) *Process {
 	return NewProcess(runner, false)
 }
 
-// StdoutPipe returns a reader connected to the process stdout. Writing
-// to the process stdout will be readable from the returned reader.
+// StdoutPipe returns a reader connected to the process stdout.
 func (p *Process) StdoutPipe() io.Reader {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -102,8 +86,7 @@ func (p *Process) CaptureStdout() *bytes.Buffer {
 	return p.outBuf
 }
 
-// StderrPipe returns a reader connected to the process stderr. Writing
-// to the process stderr will be readable from the returned reader.
+// StderrPipe returns a reader connected to the process stderr.
 func (p *Process) StderrPipe() io.Reader {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -151,9 +134,7 @@ func (p *Process) SetArgs(args []string) {
 	p.args = args
 }
 
-// Write writes data to the process stdin. It creates a stdin pipe on
-// first call if one does not exist. This allows continuous writing to
-// the process while it runs concurrently.
+// Write writes data to the process stdin.
 func (p *Process) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	if p.stdinW == nil {
@@ -165,8 +146,7 @@ func (p *Process) Write(b []byte) (int, error) {
 	return w.Write(b)
 }
 
-// Close closes the process stdin writer. This signals EOF to the
-// process, allowing it to complete reading.
+// Close closes the process stdin writer.
 func (p *Process) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -176,29 +156,39 @@ func (p *Process) Close() error {
 	return nil
 }
 
-// Run executes the process runner synchronously. It wires configured
-// streams, invokes the runner with the provided arguments, and closes
-// any process-owned writers and readers when complete. Returns a
-// ProcessResult containing the exit code, error, and captured output.
-func (p *Process) Run(ctx context.Context) *ProcessResult {
+// Run executes the process runner synchronously using a cloned runtime.
+func (p *Process) Run(ctx context.Context, rt *toolkit.Runtime) *ProcessResult {
 	result := &ProcessResult{}
 
-	// Invoke the runner (synchronously).
 	if p.runner == nil {
 		result.Err = fmt.Errorf("Run: no runner configured")
+		result.ExitCode = 1
+		return result
+	}
+	if rt == nil {
+		result.Err = fmt.Errorf("Run: runtime is nil")
+		result.ExitCode = 1
+		return result
+	}
+
+	procRt := rt.Clone()
+	if procRt == nil {
+		result.Err = fmt.Errorf("Run: failed to clone runtime")
 		result.ExitCode = 1
 		return result
 	}
 
 	p.mu.Lock()
 
-	// Setup stdin
 	in := p.in
 	if in == nil {
-		in = bytes.NewReader(nil)
+		if p.stdinPipe == nil || p.stdinW == nil {
+			p.stdinPipe, p.stdinW = io.Pipe()
+		}
+		in = p.stdinPipe
+		p.in = in
 	}
 
-	// Setup stdout
 	out := p.out
 	if out == nil {
 		if p.outBuf != nil {
@@ -211,7 +201,6 @@ func (p *Process) Run(ctx context.Context) *ProcessResult {
 		}
 	}
 
-	// Setup stderr
 	errOut := p.err
 	if errOut == nil {
 		if p.errBuf != nil {
@@ -226,7 +215,6 @@ func (p *Process) Run(ctx context.Context) *ProcessResult {
 
 	p.mu.Unlock()
 
-	// Build the stream
 	stream := &toolkit.Stream{
 		In:      in,
 		Out:     out,
@@ -234,24 +222,22 @@ func (p *Process) Run(ctx context.Context) *ProcessResult {
 		IsPiped: in != nil,
 		IsTTY:   p.isTTY,
 	}
+	procRt.Stream = stream
 
-	// Execute the runner
-	exitCode, err := p.runner(ctx, stream)
+	exitCode, err := p.runner(ctx, procRt)
 
-	// Close pipe writers if they exist
 	p.mu.Lock()
 	if p.stdoutW != nil {
-		p.stdoutW.Close()
+		_ = p.stdoutW.Close()
 	}
 	if p.stderrW != nil {
-		p.stderrW.Close()
+		_ = p.stderrW.Close()
 	}
 	if p.stdinW != nil {
-		p.stdinW.Close()
+		_ = p.stdinW.Close()
 	}
 	p.mu.Unlock()
 
-	// Capture results
 	result.Err = err
 	result.ExitCode = exitCode
 
@@ -267,9 +253,9 @@ func (p *Process) Run(ctx context.Context) *ProcessResult {
 	return result
 }
 
-func (p *Process) RunWithIO(ctx context.Context, r io.Reader) *ProcessResult {
+func (p *Process) RunWithIO(ctx context.Context, rt *toolkit.Runtime, r io.Reader) *ProcessResult {
 	p.mu.Lock()
 	p.in = r
 	p.mu.Unlock()
-	return p.Run(ctx)
+	return p.Run(ctx, rt)
 }

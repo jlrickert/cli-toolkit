@@ -100,12 +100,14 @@ func (o *OsEnv) Getwd() (string, error) {
 
 // Setwd attempts to change the process working directory to dir.
 //
-// It also attempts to update PWD. Chdir errors are intentionally ignored to
-// avoid surprising callers.
-func (o *OsEnv) Setwd(dir string) {
+// It also attempts to update PWD.
+func (o *OsEnv) Setwd(dir string) error {
 	p, _ := filepath.Abs(dir)
-	// _ = os.Setenv("PWD", p)
-	_ = os.Chdir(p)
+	return os.Chdir(p)
+}
+
+func (o *OsEnv) CloneEnv() Env {
+	return &OsEnv{}
 }
 
 func (o *OsEnv) ExpandPath(p string) string {
@@ -254,4 +256,3 @@ func (o *OsEnv) AtomicWriteFile(rel string, data []byte, perm os.FileMode) error
 
 // Ensure implementations satisfy the interfaces.
 var _ Env = (*OsEnv)(nil)
-var _ FileSystem = (*OsEnv)(nil)
