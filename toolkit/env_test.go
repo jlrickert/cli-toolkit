@@ -22,6 +22,8 @@ func (envOnly) GetHome() (string, error)       { return "", nil }
 func (envOnly) SetHome(string) error           { return nil }
 func (envOnly) GetUser() (string, error)       { return "", nil }
 func (envOnly) SetUser(string) error           { return nil }
+func (envOnly) GetJail() string                { return "" }
+func (envOnly) SetJail(string) error           { return nil }
 func (envOnly) Getwd() (string, error)         { return "/", nil }
 func (envOnly) Setwd(string) error             { return nil }
 func (envOnly) GetTempDir() string             { return "/tmp" }

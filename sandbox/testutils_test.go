@@ -24,7 +24,7 @@ func TestFixture_WithEnvironment(t *testing.T) {
 		tu.WithEnv("LOG_LEVEL", "info"),
 	)
 
-	env := sandbox.Runtime().Env
+	env := sandbox.Runtime().Env()
 	assert.Equal(t, "true", env.Get("DEBUG"))
 	assert.Equal(t, "info", env.Get("LOG_LEVEL"))
 }
@@ -34,7 +34,7 @@ func TestFixture_WithEnvironment(t *testing.T) {
 func TestFixture_WithFixtures(t *testing.T) {
 	t.Parallel()
 
-	sandbox := tu.NewSandbox(t, &tu.SandboxOptions{
+	sandbox := tu.NewSandbox(t, &tu.Options{
 		Data: testdata,
 	},
 		tu.WithFixture("example", "~/fixtures/example"),

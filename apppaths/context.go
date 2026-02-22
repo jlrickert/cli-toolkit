@@ -38,7 +38,7 @@ func NewGitAppPaths(ctx context.Context, rt *toolkit.Runtime, appname string) (*
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
-	cwd, err := rt.Env.Getwd()
+	cwd, err := rt.Getwd()
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func NewGitAppPaths(ctx context.Context, rt *toolkit.Runtime, appname string) (*
 //
 // Behavior:
 //   - If an option sets a value it is used as-is.
-//   - If Root is not set it is inferred from Env.Getwd().
+//   - If Root is not set it is inferred from Runtime.Getwd().
 //   - ConfigRoot, DataRoot, StateRoot and CacheRoot use the corresponding
 //     user-scoped platform paths and are joined with DefaultAppName.
 func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
@@ -63,7 +63,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 
 	p.Root = filepath.Clean(root)
 
-	if path, err := toolkit.UserConfigPath(rt.Env); err != nil {
+	if path, err := toolkit.UserConfigPath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user config path: %w",
 			os.ErrNotExist,
@@ -72,7 +72,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 		p.ConfigRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserDataPath(rt.Env); err != nil {
+	if path, err := toolkit.UserDataPath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user data path: %w",
 			os.ErrNotExist,
@@ -81,7 +81,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 		p.DataRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserStatePath(rt.Env); err != nil {
+	if path, err := toolkit.UserStatePath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user state root: %w",
 			os.ErrNotExist,
@@ -90,7 +90,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 		p.StateRoot = filepath.Join(path, p.Appname)
 	}
 
-	if path, err := toolkit.UserCachePath(rt.Env); err != nil {
+	if path, err := toolkit.UserCachePath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user cache root: %w",
 			os.ErrNotExist,

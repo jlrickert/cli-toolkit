@@ -28,7 +28,7 @@ func TestPipeline_SingleStage(t *testing.T) {
 	t.Parallel()
 
 	runner := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		_, _ = fmt.Fprintln(s.Out, "single stage output")
 		return 0, nil
 	}
@@ -49,7 +49,7 @@ func TestPipeline_TwoStages(t *testing.T) {
 	t.Parallel()
 
 	producer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		lines := []string{"alpha", "beta", "gamma"}
 		for _, line := range lines {
 			_, _ = fmt.Fprintln(s.Out, line)
@@ -58,7 +58,7 @@ func TestPipeline_TwoStages(t *testing.T) {
 	}
 
 	consumer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		sc := bufio.NewScanner(s.In)
 		for sc.Scan() {
 			line := sc.Text()

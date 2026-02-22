@@ -55,7 +55,7 @@ func NewProcess(fn Runner, isTTY bool) *Process {
 // NewProducer constructs a Process that emits the provided lines to stdout.
 func NewProducer(interval time.Duration, lines []string) *Process {
 	runner := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		for _, l := range lines {
 			fmt.Fprintln(s.Out, l)
 			time.Sleep(interval)
@@ -222,7 +222,11 @@ func (p *Process) Run(ctx context.Context, rt *toolkit.Runtime) *ProcessResult {
 		IsPiped: in != nil,
 		IsTTY:   p.isTTY,
 	}
-	procRt.Stream = stream
+	if err := procRt.SetStream(stream); err != nil {
+		result.Err = err
+		result.ExitCode = 1
+		return result
+	}
 
 	exitCode, err := p.runner(ctx, procRt)
 

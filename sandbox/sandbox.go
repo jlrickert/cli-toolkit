@@ -16,8 +16,8 @@ import (
 	"github.com/jlrickert/cli-toolkit/toolkit"
 )
 
-// SandboxOption is a function used to modify a Sandbox during construction.
-type SandboxOption func(f *Sandbox)
+// Option is a function used to modify a Sandbox during construction.
+type Option func(f *Sandbox)
 
 // Sandbox bundles common test setup used by package tests.
 type Sandbox struct {
@@ -26,22 +26,17 @@ type Sandbox struct {
 	data embed.FS
 	ctx  context.Context
 	rt   *toolkit.Runtime
-
-	logger *mylog.TestHandler
-	env    *toolkit.TestEnv
-	clock  *clock.TestClock
-	hasher *toolkit.MD5Hasher
 }
 
-// SandboxOptions holds optional settings provided to NewSandbox.
-type SandboxOptions struct {
+// Options holds optional settings provided to NewSandbox.
+type Options struct {
 	Data embed.FS
 	Home string
 	User string
 }
 
 // NewSandbox constructs a Sandbox and applies given options.
-func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *Sandbox {
+func NewSandbox(t *testing.T, options *Options, opts ...Option) *Sandbox {
 	t.Helper()
 	jail := t.TempDir()
 
@@ -53,21 +48,20 @@ func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *S
 		user = options.User
 		data = options.Data
 	}
-	env := toolkit.NewTestEnv(jail, home, user)
 
-	lg, handler := mylog.NewTestLogger(t, mylog.ParseLevel("debug"))
+	lg, _ := mylog.NewTestLogger(t, mylog.ParseLevel("debug"))
 	clk := clock.NewTestClock(time.Date(2025, 10, 15, 12, 30, 0, 0, time.UTC))
 	hasher := &toolkit.MD5Hasher{}
 	stream := toolkit.DefaultStream()
 
-	rt, err := toolkit.NewRuntime(
-		toolkit.WithRuntimeEnv(env),
-		toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
+	rt, err := toolkit.NewTestRuntime(
+		jail,
+		home,
+		user,
 		toolkit.WithRuntimeClock(clk),
 		toolkit.WithRuntimeLogger(lg),
 		toolkit.WithRuntimeStream(stream),
 		toolkit.WithRuntimeHasher(hasher),
-		toolkit.WithRuntimeJail(jail),
 	)
 	if err != nil {
 		t.Fatalf("NewSandbox: runtime init failed: %v", err)
@@ -80,14 +74,10 @@ func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *S
 	ctx = toolkit.WithStream(ctx, stream)
 
 	f := &Sandbox{
-		t:      t,
-		ctx:    ctx,
-		data:   data,
-		rt:     rt,
-		logger: handler,
-		hasher: hasher,
-		env:    env,
-		clock:  clk,
+		t:    t,
+		ctx:  ctx,
+		data: data,
+		rt:   rt,
 	}
 
 	for _, opt := range opts {
@@ -98,51 +88,45 @@ func NewSandbox(t *testing.T, options *SandboxOptions, opts ...SandboxOption) *S
 	return f
 }
 
-// WithEnv returns a SandboxOption that sets a single environment variable
+// WithEnv returns an Option that sets a single environment variable
 // in the sandbox's Env.
-func WithEnv(key, val string) SandboxOption {
+func WithEnv(key, val string) Option {
 	return func(f *Sandbox) {
 		f.t.Helper()
-		if f.env == nil {
-			f.t.Fatalf("WithEnv: sandbox Env is nil")
-		}
-		if err := f.env.Set(key, val); err != nil {
+		if err := f.runtimeEnv().Set(key, val); err != nil {
 			f.t.Fatalf("WithEnv failed to set %s: %v", key, err)
 		}
 	}
 }
 
-// WithWd returns a SandboxOption that sets the sandbox working directory.
-func WithWd(rel string) SandboxOption {
+// WithWd returns an Option that sets the sandbox working directory.
+func WithWd(rel string) Option {
 	return func(sandbox *Sandbox) {
 		sandbox.t.Helper()
 		path, err := sandbox.ResolvePath(rel)
 		if err != nil {
 			sandbox.t.Fatalf("WithWd: resolve %q failed: %v", rel, err)
 		}
-		if err := sandbox.env.Setwd(path); err != nil {
+		if err := sandbox.rt.Setwd(path); err != nil {
 			sandbox.t.Fatalf("WithWd: setwd %q failed: %v", path, err)
 		}
 	}
 }
 
-// WithClock returns a SandboxOption that sets the test clock to the provided time.
-func WithClock(t0 time.Time) SandboxOption {
+// WithClock returns an Option that sets the test clock to the provided time.
+func WithClock(t0 time.Time) Option {
 	return func(f *Sandbox) {
 		f.t.Helper()
-		if f.clock == nil {
-			f.t.Fatalf("WithClock: sandbox Clock is nil")
-		}
-		f.clock.Set(t0)
+		f.testClock().Set(t0)
 	}
 }
 
-// WithEnvMap returns a SandboxOption that seeds multiple environment variables.
-func WithEnvMap(m map[string]string) SandboxOption {
+// WithEnvMap returns an Option that seeds multiple environment variables.
+func WithEnvMap(m map[string]string) Option {
 	return func(f *Sandbox) {
 		f.t.Helper()
 		for k, v := range m {
-			if err := f.env.Set(k, v); err != nil {
+			if err := f.runtimeEnv().Set(k, v); err != nil {
 				f.t.Fatalf("WithEnvMap set %s failed: %v", k, err)
 			}
 		}
@@ -150,7 +134,7 @@ func WithEnvMap(m map[string]string) SandboxOption {
 }
 
 // WithFixture copies an embedded fixture directory into the sandbox jail.
-func WithFixture(fixture string, path string) SandboxOption {
+func WithFixture(fixture string, path string) Option {
 	return func(f *Sandbox) {
 		f.t.Helper()
 
@@ -174,7 +158,7 @@ func (sandbox *Sandbox) GetJail() string {
 	if sandbox.rt == nil {
 		return ""
 	}
-	return sandbox.rt.Jail
+	return sandbox.rt.GetJail()
 }
 
 // Context returns the sandbox context.
@@ -243,6 +227,28 @@ func (sandbox *Sandbox) ResolvePath(rel string) (string, error) {
 }
 
 func (sandbox *Sandbox) cleanup() {}
+
+func (sandbox *Sandbox) runtimeEnv() toolkit.Env {
+	sandbox.t.Helper()
+	if sandbox.rt == nil {
+		sandbox.t.Fatalf("sandbox runtime env is nil")
+	}
+	return sandbox.rt
+}
+
+func (sandbox *Sandbox) testClock() *clock.TestClock {
+	sandbox.t.Helper()
+	if sandbox.rt != nil {
+		if tc, ok := sandbox.rt.Clock().(*clock.TestClock); ok && tc != nil {
+			return tc
+		}
+	}
+	if tc, ok := clock.ClockFromContext(sandbox.ctx).(*clock.TestClock); ok && tc != nil {
+		return tc
+	}
+	sandbox.t.Fatalf("sandbox test clock is not available")
+	return nil
+}
 
 // DumpJailTree logs a tree of files and directories rooted at the sandbox jail.
 func (sandbox *Sandbox) DumpJailTree(maxDepth int) {
@@ -330,19 +336,19 @@ func (sandbox *Sandbox) DumpFileContent(rel string) {
 // Advance advances the sandbox test clock by the given duration.
 func (sandbox *Sandbox) Advance(d time.Duration) {
 	sandbox.t.Helper()
-	sandbox.clock.Advance(d)
+	sandbox.testClock().Advance(d)
 }
 
 // Now returns the current time from the sandbox test clock.
 func (sandbox *Sandbox) Now() time.Time {
 	sandbox.t.Helper()
-	return sandbox.clock.Now()
+	return sandbox.testClock().Now()
 }
 
 // Getwd returns the sandbox working directory.
 func (sandbox *Sandbox) Getwd() (string, error) {
 	sandbox.t.Helper()
-	return sandbox.env.Getwd()
+	return sandbox.rt.Getwd()
 }
 
 // Setwd sets the sandbox working directory.
@@ -352,13 +358,13 @@ func (sandbox *Sandbox) Setwd(dir string) error {
 	if err != nil {
 		return err
 	}
-	return sandbox.env.Setwd(path)
+	return sandbox.rt.Setwd(path)
 }
 
 // GetHome returns the sandbox home.
 func (sandbox *Sandbox) GetHome() (string, error) {
 	sandbox.t.Helper()
-	return sandbox.env.GetHome()
+	return sandbox.runtimeEnv().GetHome()
 }
 
 // copyEmbedDir recursively copies a directory tree from an embedded FS to dst.

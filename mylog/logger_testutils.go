@@ -52,6 +52,7 @@ type TestHandler struct {
 	Entries []LoggedEntry
 	T       testingT
 	attrs   []slog.Attr
+	filter  func(entry LoggedEntry) bool
 }
 
 // NewTestHandler creates an empty TestHandler. Optionally pass a testing.T
@@ -94,7 +95,10 @@ func (h *TestHandler) Handle(ctx context.Context, r slog.Record) error {
 	h.Entries = append(h.Entries, e)
 	h.mu.Unlock()
 
-	if h.T != nil {
+	if h.filter == nil {
+		h.filter = func(entry LoggedEntry) bool { return false }
+	}
+	if h.T != nil && h.filter(e) {
 		data, _ := json.Marshal(e)
 		indedentedData := bytes.Buffer{}
 		json.Indent(&indedentedData, data, "", "\t")

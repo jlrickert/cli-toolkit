@@ -32,22 +32,22 @@ func TestNewAppPathsManualRootDefaults(t *testing.T) {
 
 	// Verify config/data/state/cache roots align with user-scoped paths joined
 	// with the application name.
-	ucfg, err := toolkit.UserConfigPath(f.Runtime().Env)
+	ucfg, err := toolkit.UserConfigPath(f.Runtime())
 	require.NoError(t, err)
 	expectedCfg := filepath.Join(ucfg, appname)
 	assert.Equal(t, expectedCfg, p.ConfigRoot)
 
-	udata, err := toolkit.UserDataPath(f.Runtime().Env)
+	udata, err := toolkit.UserDataPath(f.Runtime())
 	require.NoError(t, err)
 	expectedData := filepath.Join(udata, appname)
 	assert.Equal(t, expectedData, p.DataRoot)
 
-	ustate, err := toolkit.UserStatePath(f.Runtime().Env)
+	ustate, err := toolkit.UserStatePath(f.Runtime())
 	require.NoError(t, err)
 	expectedState := filepath.Join(ustate, appname)
 	assert.Equal(t, expectedState, p.StateRoot)
 
-	ucache, err := toolkit.UserCachePath(f.Runtime().Env)
+	ucache, err := toolkit.UserCachePath(f.Runtime())
 	require.NoError(t, err)
 	expectedCache := filepath.Join(ucache, appname)
 	assert.Equal(t, expectedCache, p.CacheRoot)

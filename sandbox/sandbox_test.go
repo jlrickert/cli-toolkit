@@ -19,8 +19,8 @@ func TestSandbox_BasicSetup(t *testing.T) {
 	ctx := sandbox.Context()
 	require.NotNil(t, ctx)
 	require.NotNil(t, sandbox.Runtime())
-	require.NotNil(t, sandbox.Runtime().Env)
-	require.NotNil(t, sandbox.Runtime().FS)
+	require.NotNil(t, sandbox.Runtime().Env())
+	require.NotNil(t, sandbox.Runtime().FS())
 
 	logger := mylog.LoggerFromContext(ctx)
 	require.NotNil(t, logger)
@@ -32,7 +32,7 @@ func TestSandbox_BasicSetup(t *testing.T) {
 func TestSandbox_WithFixture(t *testing.T) {
 	t.Parallel()
 
-	sandbox := tu.NewSandbox(t, &tu.SandboxOptions{Data: testdata}, tu.WithFixture("example", "~/fixtures/example"))
+	sandbox := tu.NewSandbox(t, &tu.Options{Data: testdata}, tu.WithFixture("example", "~/fixtures/example"))
 
 	data := sandbox.MustReadFile("fixtures/example/example.txt")
 	require.NotEmpty(t, data)
@@ -79,7 +79,7 @@ func TestSandbox_RuntimeCarriesEnv(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
-	env := sandbox.Runtime().Env
+	env := sandbox.Runtime().Env()
 	require.NotNil(t, env)
 
 	home, err := env.GetHome()
@@ -103,8 +103,8 @@ func TestSandbox_MultipleContexts(t *testing.T) {
 	sandbox1 := tu.NewSandbox(t, nil, tu.WithEnv("TEST_KEY", "value1"))
 	sandbox2 := tu.NewSandbox(t, nil, tu.WithEnv("TEST_KEY", "value2"))
 
-	env1 := sandbox1.Runtime().Env
-	env2 := sandbox2.Runtime().Env
+	env1 := sandbox1.Runtime().Env()
+	env2 := sandbox2.Runtime().Env()
 
 	require.Equal(t, "value1", env1.Get("TEST_KEY"))
 	require.Equal(t, "value2", env2.Get("TEST_KEY"))
@@ -114,11 +114,11 @@ func TestSandbox_RuntimePersistsAcrossOperations(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
-	env := sandbox.Runtime().Env
+	env := sandbox.Runtime().Env()
 	err := env.Set("PERSIST_KEY", "persist_value")
 	require.NoError(t, err)
 
-	env2 := sandbox.Runtime().Env
+	env2 := sandbox.Runtime().Env()
 	require.Equal(t, "persist_value", env2.Get("PERSIST_KEY"))
 }
 
@@ -130,7 +130,7 @@ func TestSandbox_ContextWithCustomOptions(t *testing.T) {
 		tu.WithEnv("DEBUG", "true"),
 	)
 
-	env := sandbox.Runtime().Env
+	env := sandbox.Runtime().Env()
 	require.Equal(t, "custom_value", env.Get("CUSTOM_VAR"))
 	require.Equal(t, "true", env.Get("DEBUG"))
 }

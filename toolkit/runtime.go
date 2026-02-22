@@ -16,15 +16,17 @@ import (
 // Context values are not used for mutable runtime dependencies; callers pass a
 // Runtime directly.
 type Runtime struct {
-	Env    Env
-	FS     FileSystem
-	Clock  clock.Clock
-	Logger *slog.Logger
-	Stream *Stream
-	Hasher Hasher
+	env    Env
+	fs     FileSystem
+	clock  clock.Clock
+	logger *slog.Logger
+	stream *Stream
+	hasher Hasher
 
-	// Jail is an optional host path used to confine filesystem operations.
-	Jail string
+	// jail and wd are canonical state managed by Runtime and applied to both
+	// env and filesystem.
+	jail string
+	wd   string
 }
 
 // RuntimeOption mutates Runtime construction.
@@ -33,12 +35,12 @@ type RuntimeOption func(*Runtime) error
 // NewRuntime constructs a Runtime with defaults and applies options.
 func NewRuntime(opts ...RuntimeOption) (*Runtime, error) {
 	rt := &Runtime{
-		Env:    &OsEnv{},
-		FS:     &OsFS{},
-		Clock:  &clock.OsClock{},
-		Logger: mylog.NewDiscardLogger(),
-		Stream: DefaultStream(),
-		Hasher: DefaultHasher,
+		env:    &OsEnv{},
+		fs:     &OsFS{},
+		clock:  &clock.OsClock{},
+		logger: mylog.NewDiscardLogger(),
+		stream: DefaultStream(),
+		hasher: DefaultHasher,
 	}
 
 	for _, opt := range opts {
@@ -48,6 +50,10 @@ func NewRuntime(opts ...RuntimeOption) (*Runtime, error) {
 		if err := opt(rt); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := rt.normalizeState(); err != nil {
+		return nil, err
 	}
 
 	if err := rt.Validate(); err != nil {
@@ -62,7 +68,7 @@ func WithRuntimeEnv(env Env) RuntimeOption {
 		if env == nil {
 			return fmt.Errorf("runtime env cannot be nil")
 		}
-		rt.Env = env
+		rt.env = env
 		return nil
 	}
 }
@@ -72,7 +78,7 @@ func WithRuntimeFileSystem(fs FileSystem) RuntimeOption {
 		if fs == nil {
 			return fmt.Errorf("runtime filesystem cannot be nil")
 		}
-		rt.FS = fs
+		rt.fs = fs
 		return nil
 	}
 }
@@ -82,7 +88,7 @@ func WithRuntimeClock(c clock.Clock) RuntimeOption {
 		if c == nil {
 			return fmt.Errorf("runtime clock cannot be nil")
 		}
-		rt.Clock = c
+		rt.clock = c
 		return nil
 	}
 }
@@ -92,7 +98,7 @@ func WithRuntimeLogger(lg *slog.Logger) RuntimeOption {
 		if lg == nil {
 			return fmt.Errorf("runtime logger cannot be nil")
 		}
-		rt.Logger = lg
+		rt.logger = lg
 		return nil
 	}
 }
@@ -102,7 +108,7 @@ func WithRuntimeStream(s *Stream) RuntimeOption {
 		if s == nil {
 			return fmt.Errorf("runtime stream cannot be nil")
 		}
-		rt.Stream = s
+		rt.stream = s
 		return nil
 	}
 }
@@ -112,16 +118,84 @@ func WithRuntimeHasher(h Hasher) RuntimeOption {
 		if h == nil {
 			return fmt.Errorf("runtime hasher cannot be nil")
 		}
-		rt.Hasher = h
+		rt.hasher = h
 		return nil
 	}
 }
 
 func WithRuntimeJail(jail string) RuntimeOption {
 	return func(rt *Runtime) error {
-		rt.Jail = filepath.Clean(jail)
+		rt.jail = cleanJail(jail)
 		return nil
 	}
+}
+
+func cleanJail(jail string) string {
+	if strings.TrimSpace(jail) == "" {
+		return ""
+	}
+	return filepath.Clean(jail)
+}
+
+func normalizePath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return string(filepath.Separator)
+	}
+	return filepath.Clean(path)
+}
+
+func (rt *Runtime) normalizeState() error {
+	if rt == nil {
+		return fmt.Errorf("runtime is nil")
+	}
+	if rt.env == nil {
+		return fmt.Errorf("runtime env is nil")
+	}
+	if rt.fs == nil {
+		return fmt.Errorf("runtime filesystem is nil")
+	}
+
+	if rt.jail == "" {
+		rt.jail = cleanJail(rt.env.GetJail())
+		if rt.jail == "" {
+			rt.jail = cleanJail(rt.fs.GetJail())
+		}
+	}
+
+	if err := rt.fs.SetJail(rt.jail); err != nil {
+		return err
+	}
+	if err := rt.env.SetJail(rt.jail); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(rt.wd) == "" {
+		if cwd, err := rt.env.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+			rt.wd = filepath.Clean(cwd)
+		} else if cwd, err := rt.fs.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+			rt.wd = filepath.Clean(cwd)
+		} else {
+			rt.wd = string(filepath.Separator)
+		}
+	}
+
+	return rt.applyWorkingDir(rt.wd)
+}
+
+func (rt *Runtime) applyWorkingDir(dir string) error {
+	target := normalizePath(dir)
+	if err := rt.fs.Setwd(target); err != nil {
+		return err
+	}
+	if err := rt.env.Setwd(target); err != nil {
+		return err
+	}
+	if wd, err := rt.fs.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		rt.wd = filepath.Clean(wd)
+		return nil
+	}
+	rt.wd = target
+	return nil
 }
 
 // Validate ensures required runtime dependencies are present.
@@ -129,29 +203,29 @@ func (rt *Runtime) Validate() error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
-	if rt.Env == nil {
+	if rt.env == nil {
 		return fmt.Errorf("runtime env is nil")
 	}
-	if rt.FS == nil {
+	if rt.fs == nil {
 		return fmt.Errorf("runtime filesystem is nil")
 	}
-	if rt.Clock == nil {
+	if rt.clock == nil {
 		return fmt.Errorf("runtime clock is nil")
 	}
-	if rt.Logger == nil {
+	if rt.logger == nil {
 		return fmt.Errorf("runtime logger is nil")
 	}
-	if rt.Stream == nil {
+	if rt.stream == nil {
 		return fmt.Errorf("runtime stream is nil")
 	}
-	if rt.Hasher == nil {
+	if rt.hasher == nil {
 		return fmt.Errorf("runtime hasher is nil")
 	}
 	return nil
 }
 
-// Clone returns a shallow clone of the runtime and a deep clone of Env/Stream
-// when supported.
+// Clone returns a shallow clone of runtime dependencies and deep-copies Env and
+// Stream when supported.
 func (rt *Runtime) Clone() *Runtime {
 	if rt == nil {
 		return nil
@@ -159,31 +233,247 @@ func (rt *Runtime) Clone() *Runtime {
 
 	clone := *rt
 
-	if rt.Env != nil {
-		if cloner, ok := rt.Env.(EnvCloner); ok {
-			clone.Env = cloner.CloneEnv()
+	if rt.env != nil {
+		if cloner, ok := rt.env.(EnvCloner); ok {
+			clone.env = cloner.CloneEnv()
 		}
 	}
 
-	if rt.Stream != nil {
-		streamCopy := *rt.Stream
-		clone.Stream = &streamCopy
+	if rt.stream != nil {
+		streamCopy := *rt.stream
+		clone.stream = &streamCopy
 	}
 
 	return &clone
 }
 
-func (rt *Runtime) hostPath(path string) string {
-	if rt.Jail == "" {
-		return filepath.Clean(path)
+// Env returns the runtime Env dependency.
+func (rt *Runtime) Env() Env { return rt.env }
+
+// FS returns the runtime FileSystem dependency.
+func (rt *Runtime) FS() FileSystem { return rt.fs }
+
+// Clock returns the runtime clock dependency.
+func (rt *Runtime) Clock() clock.Clock { return rt.clock }
+
+// SetClock updates the runtime clock dependency.
+func (rt *Runtime) SetClock(c clock.Clock) error {
+	if c == nil {
+		return fmt.Errorf("runtime clock cannot be nil")
 	}
-	return filepath.Clean(filepath.Join(rt.Jail, path))
+	rt.clock = c
+	return nil
 }
 
-// AbsPath returns a cleaned absolute runtime path.
-//
-// The returned path is relative to the runtime jail root when a jail is set
-// (e.g. "/home/testuser/file").
+// Logger returns the runtime logger dependency.
+func (rt *Runtime) Logger() *slog.Logger { return rt.logger }
+
+// SetLogger updates the runtime logger dependency.
+func (rt *Runtime) SetLogger(lg *slog.Logger) error {
+	if lg == nil {
+		return fmt.Errorf("runtime logger cannot be nil")
+	}
+	rt.logger = lg
+	return nil
+}
+
+// Stream returns the runtime stream dependency.
+func (rt *Runtime) Stream() *Stream { return rt.stream }
+
+// SetStream updates the runtime stream dependency.
+func (rt *Runtime) SetStream(s *Stream) error {
+	if s == nil {
+		return fmt.Errorf("runtime stream cannot be nil")
+	}
+	rt.stream = s
+	return nil
+}
+
+// Hasher returns the runtime hasher dependency.
+func (rt *Runtime) Hasher() Hasher { return rt.hasher }
+
+// SetHasher updates the runtime hasher dependency.
+func (rt *Runtime) SetHasher(h Hasher) error {
+	if h == nil {
+		return fmt.Errorf("runtime hasher cannot be nil")
+	}
+	rt.hasher = h
+	return nil
+}
+
+// --- Env forwarding methods ---
+
+func (rt *Runtime) Name() string {
+	if rt == nil || rt.env == nil {
+		return "runtime"
+	}
+	return rt.env.Name()
+}
+
+func (rt *Runtime) Get(key string) string {
+	if rt == nil || rt.env == nil {
+		return ""
+	}
+	return rt.env.Get(key)
+}
+
+func (rt *Runtime) Set(key, value string) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	if key == "PWD" {
+		return rt.Setwd(value)
+	}
+	return rt.env.Set(key, value)
+}
+
+func (rt *Runtime) Has(key string) bool {
+	if rt == nil || rt.env == nil {
+		return false
+	}
+	return rt.env.Has(key)
+}
+
+func (rt *Runtime) Environ() []string {
+	if rt == nil || rt.env == nil {
+		return nil
+	}
+	return rt.env.Environ()
+}
+
+func (rt *Runtime) Unset(key string) {
+	if rt == nil || rt.env == nil {
+		return
+	}
+	rt.env.Unset(key)
+}
+
+func (rt *Runtime) GetHome() (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+	return rt.env.GetHome()
+}
+
+func (rt *Runtime) SetHome(home string) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	return rt.env.SetHome(home)
+}
+
+func (rt *Runtime) GetUser() (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+	return rt.env.GetUser()
+}
+
+func (rt *Runtime) SetUser(user string) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	return rt.env.SetUser(user)
+}
+
+func (rt *Runtime) GetTempDir() string {
+	if rt == nil || rt.env == nil {
+		return os.TempDir()
+	}
+	return rt.env.GetTempDir()
+}
+
+// GetJail returns the canonical runtime jail.
+func (rt *Runtime) GetJail() string {
+	if rt == nil {
+		return ""
+	}
+	return rt.jail
+}
+
+// SetJail sets the canonical runtime jail and propagates it to both Env and FS.
+func (rt *Runtime) SetJail(jail string) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+
+	rt.jail = cleanJail(jail)
+	if err := rt.fs.SetJail(rt.jail); err != nil {
+		return err
+	}
+	if err := rt.env.SetJail(rt.jail); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(rt.wd) == "" {
+		rt.wd = string(filepath.Separator)
+	}
+	if err := rt.applyWorkingDir(rt.wd); err != nil {
+		fallback := string(filepath.Separator)
+		if fallbackErr := rt.applyWorkingDir(fallback); fallbackErr != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Getwd returns the canonical runtime working directory.
+func (rt *Runtime) Getwd() (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(rt.wd) == "" {
+		if err := rt.normalizeState(); err != nil {
+			return "", err
+		}
+	}
+	return rt.wd, nil
+}
+
+func (rt *Runtime) resolveWorkingDir(dir string) (string, error) {
+	if strings.TrimSpace(dir) == "" || dir == "." {
+		return rt.Getwd()
+	}
+
+	expanded := ExpandEnv(rt, dir)
+	p, err := ExpandPath(rt, expanded)
+	if err != nil {
+		return "", err
+	}
+
+	if !filepath.IsAbs(p) {
+		cwd, err := rt.Getwd()
+		if err != nil {
+			return "", err
+		}
+		p = filepath.Join(cwd, p)
+	}
+
+	resolved, err := rt.fs.ResolvePath(filepath.Clean(p), false)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+// Setwd sets the canonical runtime working directory and propagates it to both
+// Env and FileSystem.
+func (rt *Runtime) Setwd(dir string) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+
+	resolved, err := rt.resolveWorkingDir(dir)
+	if err != nil {
+		return err
+	}
+
+	return rt.applyWorkingDir(resolved)
+}
+
+// --- FileSystem forwarding methods ---
+
+// AbsPath returns a cleaned absolute runtime path based on runtime env/cwd.
 func (rt *Runtime) AbsPath(rel string) (string, error) {
 	if strings.TrimSpace(rel) == "" {
 		return "", nil
@@ -192,85 +482,53 @@ func (rt *Runtime) AbsPath(rel string) (string, error) {
 		return "", err
 	}
 
-	p, err := ExpandPath(rt.Env, rel)
+	expanded := ExpandEnv(rt, rel)
+	p, err := ExpandPath(rt, expanded)
 	if err != nil {
 		return "", err
 	}
 
 	if !filepath.IsAbs(p) {
-		cwd, err := rt.Env.Getwd()
+		cwd, err := rt.Getwd()
 		if err != nil {
 			return "", err
 		}
 		p = filepath.Join(cwd, p)
 	}
 
-	p = filepath.Clean(p)
-
-	if rt.Jail == "" {
-		return p, nil
-	}
-
-	host := rt.hostPath(p)
-	if !IsInJail(rt.Jail, host) {
-		return "", fmt.Errorf("AbsPath outside of jail %s: %w", host, ErrEscapeAttempt)
-	}
-	return RemoveJailPrefix(rt.Jail, host), nil
+	return filepath.Clean(p), nil
 }
 
-// ResolvePath resolves rel to an absolute runtime path and optionally follows
-// symlinks.
+// ResolvePath resolves rel to an absolute path and optionally follows symlinks.
 func (rt *Runtime) ResolvePath(rel string, follow bool) (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+
+	var p string
 	if strings.TrimSpace(rel) == "" || rel == "." {
-		if err := rt.Validate(); err != nil {
-			return "", err
-		}
-		wd, err := rt.Env.Getwd()
+		cwd, err := rt.Getwd()
 		if err != nil {
 			return "", err
 		}
-		if rt.Jail != "" {
-			host := rt.hostPath(wd)
-			if !IsInJail(rt.Jail, host) {
-				return "", fmt.Errorf("ResolvePath outside of jail %s: %w", host, ErrEscapeAttempt)
-			}
-			if follow {
-				resolved, err := filepath.EvalSymlinks(host)
-				if err != nil {
-					return "", err
-				}
-				if !IsInJail(rt.Jail, resolved) {
-					return "", fmt.Errorf("ResolvePath outside of jail %s: %w", resolved, ErrEscapeAttempt)
-				}
-				return RemoveJailPrefix(rt.Jail, resolved), nil
-			}
-			return RemoveJailPrefix(rt.Jail, host), nil
+		p = cwd
+	} else {
+		expanded := ExpandEnv(rt, rel)
+		parsed, err := ExpandPath(rt, expanded)
+		if err != nil {
+			return "", err
 		}
-		return filepath.Clean(wd), nil
-	}
-
-	path, err := rt.AbsPath(rel)
-	if err != nil {
-		return "", err
-	}
-	if !follow {
-		return filepath.Clean(path), nil
-	}
-
-	host := rt.hostPath(path)
-	resolved, err := filepath.EvalSymlinks(host)
-	if err != nil {
-		return "", err
-	}
-
-	if rt.Jail != "" {
-		if !IsInJail(rt.Jail, resolved) {
-			return "", fmt.Errorf("ResolvePath outside of jail %s: %w", resolved, ErrEscapeAttempt)
+		p = parsed
+		if !filepath.IsAbs(p) {
+			cwd, err := rt.Getwd()
+			if err != nil {
+				return "", err
+			}
+			p = filepath.Join(cwd, p)
 		}
-		return RemoveJailPrefix(rt.Jail, resolved), nil
 	}
 
-	return filepath.Clean(resolved), nil
+	return rt.fs.ResolvePath(filepath.Clean(p), follow)
 }
 
 // RelativePath returns path relative to basepath. If computation fails, target
@@ -300,7 +558,7 @@ func (rt *Runtime) ReadFile(rel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rt.FS.ReadFile(rt.hostPath(path))
+	return rt.fs.ReadFile(path)
 }
 
 func (rt *Runtime) WriteFile(rel string, data []byte, perm os.FileMode) error {
@@ -311,11 +569,10 @@ func (rt *Runtime) WriteFile(rel string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	host := rt.hostPath(path)
-	if err := rt.FS.Mkdir(filepath.Dir(host), 0o755, true); err != nil {
+	if err := rt.fs.Mkdir(filepath.Dir(path), 0o755, true); err != nil {
 		return err
 	}
-	return rt.FS.WriteFile(host, data, perm)
+	return rt.fs.WriteFile(path, data, perm)
 }
 
 func (rt *Runtime) Mkdir(rel string, perm os.FileMode, all bool) error {
@@ -326,7 +583,7 @@ func (rt *Runtime) Mkdir(rel string, perm os.FileMode, all bool) error {
 	if err != nil {
 		return err
 	}
-	return rt.FS.Mkdir(rt.hostPath(path), perm, all)
+	return rt.fs.Mkdir(path, perm, all)
 }
 
 func (rt *Runtime) Remove(rel string, all bool) error {
@@ -337,7 +594,7 @@ func (rt *Runtime) Remove(rel string, all bool) error {
 	if err != nil {
 		return err
 	}
-	return rt.FS.Remove(rt.hostPath(path), all)
+	return rt.fs.Remove(path, all)
 }
 
 func (rt *Runtime) Rename(src, dst string) error {
@@ -352,7 +609,7 @@ func (rt *Runtime) Rename(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return rt.FS.Rename(rt.hostPath(srcPath), rt.hostPath(dstPath))
+	return rt.fs.Rename(srcPath, dstPath)
 }
 
 func (rt *Runtime) Stat(rel string, follow bool) (os.FileInfo, error) {
@@ -363,7 +620,7 @@ func (rt *Runtime) Stat(rel string, follow bool) (os.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rt.FS.Stat(rt.hostPath(path), follow)
+	return rt.fs.Stat(path, follow)
 }
 
 func (rt *Runtime) ReadDir(rel string) ([]os.DirEntry, error) {
@@ -374,22 +631,22 @@ func (rt *Runtime) ReadDir(rel string) ([]os.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rt.FS.ReadDir(rt.hostPath(path))
+	return rt.fs.ReadDir(path)
 }
 
-func (rt *Runtime) Symlink(oldname, newname string) error {
+func (rt *Runtime) Symlink(oldName, newName string) error {
 	if err := rt.Validate(); err != nil {
 		return err
 	}
-	oldPath, err := rt.ResolvePath(oldname, false)
+	oldPath, err := rt.ResolvePath(oldName, false)
 	if err != nil {
 		return err
 	}
-	newPath, err := rt.ResolvePath(newname, false)
+	newPath, err := rt.ResolvePath(newName, false)
 	if err != nil {
 		return err
 	}
-	return rt.FS.Symlink(rt.hostPath(oldPath), rt.hostPath(newPath))
+	return rt.fs.Symlink(oldPath, newPath)
 }
 
 func (rt *Runtime) Glob(pattern string) ([]string, error) {
@@ -397,48 +654,41 @@ func (rt *Runtime) Glob(pattern string) ([]string, error) {
 		return nil, err
 	}
 
-	expanded, err := ExpandPath(rt.Env, pattern)
+	expanded := ExpandEnv(rt, pattern)
+	parsed, err := ExpandPath(rt, expanded)
 	if err != nil {
 		return nil, err
 	}
 
-	wd, err := rt.Env.Getwd()
+	wd, err := rt.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	virtualPattern := expanded
-	if !filepath.IsAbs(virtualPattern) {
-		virtualPattern = filepath.Join(wd, virtualPattern)
+	resolvedPattern := parsed
+	if !filepath.IsAbs(resolvedPattern) {
+		resolvedPattern = filepath.Join(wd, resolvedPattern)
 	}
-	virtualPattern = filepath.Clean(virtualPattern)
+	resolvedPattern = filepath.Clean(resolvedPattern)
 
-	hostPattern := rt.hostPath(virtualPattern)
-	matches, err := rt.FS.Glob(hostPattern)
+	matches, err := rt.fs.Glob(resolvedPattern)
 	if err != nil {
 		return nil, err
 	}
 
-	if rt.Jail == "" {
+	if filepath.IsAbs(parsed) {
 		return matches, nil
 	}
 
 	results := make([]string, 0, len(matches))
 	for _, match := range matches {
-		if !IsInJail(rt.Jail, match) {
+		relPath, err := filepath.Rel(wd, match)
+		if err == nil {
+			results = append(results, relPath)
 			continue
 		}
-		jailedPath := RemoveJailPrefix(rt.Jail, match)
-		if !filepath.IsAbs(expanded) {
-			relPath, err := filepath.Rel(wd, jailedPath)
-			if err == nil {
-				results = append(results, relPath)
-				continue
-			}
-		}
-		results = append(results, jailedPath)
+		results = append(results, match)
 	}
-
 	return results, nil
 }
 
@@ -450,5 +700,23 @@ func (rt *Runtime) AtomicWriteFile(rel string, data []byte, perm os.FileMode) er
 	if err != nil {
 		return err
 	}
-	return rt.FS.AtomicWriteFile(rt.hostPath(path), data, perm)
+	return rt.fs.AtomicWriteFile(path, data, perm)
 }
+
+func (rt *Runtime) Rel(basePath, targetPath string) (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+	baseResolved, err := rt.ResolvePath(basePath, false)
+	if err != nil {
+		return "", err
+	}
+	targetResolved, err := rt.ResolvePath(targetPath, false)
+	if err != nil {
+		return "", err
+	}
+	return rt.fs.Rel(baseResolved, targetResolved)
+}
+
+var _ Env = (*Runtime)(nil)
+var _ FileSystem = (*Runtime)(nil)

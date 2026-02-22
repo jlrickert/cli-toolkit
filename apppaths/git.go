@@ -19,7 +19,7 @@ func FindGitRoot(ctx context.Context, rt *toolkit.Runtime, start string) string 
 	if rt == nil {
 		return ""
 	}
-	lg := rt.Logger
+	lg := rt.Logger()
 	if lg == nil {
 		lg = mylog.NewDiscardLogger()
 	}

@@ -1,8 +1,12 @@
 package toolkit
 
-import "errors"
+import (
+	"errors"
+
+	jailpkg "github.com/jlrickert/cli-toolkit/toolkit/jail"
+)
 
 var (
 	ErrNoEnvKey      = errors.New("env key missing")
-	ErrEscapeAttempt = errors.New("path escape attempt: operation would access path outside jail")
+	ErrEscapeAttempt = jailpkg.ErrEscapeAttempt
 )

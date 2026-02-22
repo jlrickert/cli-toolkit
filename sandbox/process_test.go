@@ -32,7 +32,7 @@ func TestProcess_Run_NoStdin(t *testing.T) {
 	t.Parallel()
 
 	runner := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		_, _ = fmt.Fprintln(s.Out, "hello, world")
 		_, _ = fmt.Fprintln(s.Err, "Some error!")
 		return 0, nil
@@ -51,7 +51,7 @@ func TestProcess_Pipe_ProducerToConsumer(t *testing.T) {
 	t.Parallel()
 
 	producer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		lines := []string{"alpha", "beta", "gamma"}
 		for _, l := range lines {
 			_, _ = fmt.Fprintln(s.Out, l)
@@ -61,7 +61,7 @@ func TestProcess_Pipe_ProducerToConsumer(t *testing.T) {
 	}
 
 	consumer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		sc := bufio.NewScanner(s.In)
 		for sc.Scan() {
 			line := sc.Text()
@@ -107,7 +107,7 @@ func TestProcess_ContinuousStdin(t *testing.T) {
 	const linesToWrite = 20
 
 	consumer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		sc := bufio.NewScanner(s.In)
 		for sc.Scan() {
 			line := sc.Text()
@@ -150,7 +150,7 @@ func TestProcess_BufferedStdio(t *testing.T) {
 	const linesToWrite = 50
 
 	producer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		w := bufio.NewWriter(s.Out)
 		for i := range linesToWrite {
 			_, _ = fmt.Fprintf(w, "data-%d\n", i)
@@ -160,7 +160,7 @@ func TestProcess_BufferedStdio(t *testing.T) {
 	}
 
 	consumer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		r := bufio.NewReader(s.In)
 		for {
 			line, err := r.ReadString('\n')
@@ -217,7 +217,7 @@ func TestProcess_RunWithIO(t *testing.T) {
 	t.Parallel()
 
 	consumer := func(ctx context.Context, rt *toolkit.Runtime) (int, error) {
-		s := rt.Stream
+		s := rt.Stream()
 		sc := bufio.NewScanner(s.In)
 		for sc.Scan() {
 			line := sc.Text()
