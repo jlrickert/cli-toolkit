@@ -4,10 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jlrickert/cli-toolkit/clock"
-	"github.com/jlrickert/cli-toolkit/mylog"
 	tu "github.com/jlrickert/cli-toolkit/sandbox"
-	"github.com/jlrickert/cli-toolkit/toolkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,12 +18,8 @@ func TestSandbox_BasicSetup(t *testing.T) {
 	require.NotNil(t, sandbox.Runtime())
 	require.NotNil(t, sandbox.Runtime().Env())
 	require.NotNil(t, sandbox.Runtime().FS())
-
-	logger := mylog.LoggerFromContext(ctx)
-	require.NotNil(t, logger)
-
-	clk := clock.ClockFromContext(ctx)
-	require.NotNil(t, clk)
+	require.NotNil(t, sandbox.Runtime().Logger())
+	require.NotNil(t, sandbox.Runtime().Clock())
 }
 
 func TestSandbox_WithFixture(t *testing.T) {
@@ -38,40 +31,37 @@ func TestSandbox_WithFixture(t *testing.T) {
 	require.NotEmpty(t, data)
 }
 
-func TestSandbox_ContextCarriesStream(t *testing.T) {
+func TestSandbox_RuntimeCarriesStream(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
 
-	ctx := sandbox.Context()
-	stream := toolkit.StreamFromContext(ctx)
+	stream := sandbox.Runtime().Stream()
 	require.NotNil(t, stream)
 	require.NotNil(t, stream.In)
 	require.NotNil(t, stream.Out)
 	require.NotNil(t, stream.Err)
 }
 
-func TestSandbox_ContextCarriesHasher(t *testing.T) {
+func TestSandbox_RuntimeCarriesHasher(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
 
-	ctx := sandbox.Context()
-	hasher := toolkit.HasherFromContext(ctx)
+	hasher := sandbox.Runtime().Hasher()
 	require.NotNil(t, hasher)
 	require.NotEmpty(t, hasher.Hash([]byte("test")))
 }
 
-func TestSandbox_ContextCarriesClock(t *testing.T) {
+func TestSandbox_RuntimeCarriesClock(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
 
-	ctx := sandbox.Context()
-	clock := clock.ClockFromContext(ctx)
-	require.NotNil(t, clock)
+	clk := sandbox.Runtime().Clock()
+	require.NotNil(t, clk)
 
-	now := clock.Now()
+	now := clk.Now()
 	require.False(t, now.IsZero())
 }
 
@@ -87,13 +77,12 @@ func TestSandbox_RuntimeCarriesEnv(t *testing.T) {
 	require.NotEmpty(t, home)
 }
 
-func TestSandbox_ContextCarriesLogger(t *testing.T) {
+func TestSandbox_RuntimeCarriesLogger(t *testing.T) {
 	t.Parallel()
 
 	sandbox := tu.NewSandbox(t, nil)
 
-	ctx := sandbox.Context()
-	logger := mylog.LoggerFromContext(ctx)
+	logger := sandbox.Runtime().Logger()
 	require.NotNil(t, logger)
 }
 

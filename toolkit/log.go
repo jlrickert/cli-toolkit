@@ -1,7 +1,6 @@
 package toolkit
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -10,8 +9,12 @@ import (
 	"github.com/jlrickert/cli-toolkit/mylog"
 )
 
-func getTookitLogger(ctx context.Context) *slog.Logger {
-	lg := mylog.LoggerFromContext(ctx)
+func getTookitLogger(rt *Runtime) *slog.Logger {
+	var lg *slog.Logger
+	if rt != nil {
+		lg = rt.Logger()
+	}
+	lg = mylog.OrDefault(lg)
 	stackTrace := getStackTrace(2)
 	return lg.With(
 		slog.String("package", "toolkit"),

@@ -100,26 +100,15 @@ func NewDiscardLogger() *slog.Logger {
 // Context helpers
 ///////////////////////////////////////////////////////////////////////////////
 
-type loggerCtxKey int
+var defaultLogger = NewDiscardLogger()
 
-var (
-	ctxLoggerKey  loggerCtxKey
-	defaultLogger = NewDiscardLogger()
-)
+// Default returns the process default logger.
+func Default() *slog.Logger { return defaultLogger }
 
-// ContextWithLogger returns a copy of ctx that carries the provided logger.
-// Use this to associate a logger with a context for downstream callers.
-func WithLogger(ctx context.Context, lg *slog.Logger) context.Context {
-	return context.WithValue(ctx, ctxLoggerKey, lg)
-}
-
-// LoggerFromContext returns the logger stored in ctx. If ctx is nil or does not
-// contain a logger, slog.Default() is returned.
-func LoggerFromContext(ctx context.Context) *slog.Logger {
-	if v := ctx.Value(ctxLoggerKey); v != nil {
-		if lg, ok := v.(*slog.Logger); ok && lg != nil {
-			return lg
-		}
+// OrDefault returns lg unless it is nil, in which case the default logger is returned.
+func OrDefault(lg *slog.Logger) *slog.Logger {
+	if lg != nil {
+		return lg
 	}
 	return defaultLogger
 }

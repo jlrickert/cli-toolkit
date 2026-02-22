@@ -1,8 +1,11 @@
 package toolkit_test
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jlrickert/cli-toolkit/toolkit"
@@ -191,4 +194,41 @@ func TestUserStatePath(t *testing.T) {
 		_, err = toolkit.UserStatePath(emptyEnv)
 		require.Error(t, err)
 	}
+}
+
+func TestEdit_UsesRuntimeAndResolvesSymlinkPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("editor command fixture uses /bin/sh")
+	}
+
+	jailDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	rt, err := toolkit.NewTestRuntime(jailDir, "/home/alice", "alice")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.Mkdir("/home/alice", 0o755, true))
+	require.NoError(t, rt.Mkdir("/home/alice/work", 0o755, true))
+
+	targetPath := "/home/alice/work/keg"
+	require.NoError(t, rt.WriteFile(targetPath, []byte("kegv: \"2025-07\"\n"), 0o644))
+	require.NoError(t, rt.Symlink(targetPath, "/home/alice/keg-link"))
+
+	capturePath := filepath.Join(jailDir, "captured-editor-arg.txt")
+	scriptPath := filepath.Join(jailDir, "capture-editor.sh")
+	script := "#!/bin/sh\nprintf '%s' \"$1\" > \"$CAPTURE_FILE\"\n"
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("EDITOR", "/bin/false")
+	require.NoError(t, rt.Set("CAPTURE_FILE", capturePath))
+	require.NoError(t, rt.Set("EDITOR", "/bin/sh "+scriptPath))
+	rt.Unset("VISUAL")
+
+	err = toolkit.Edit(context.Background(), rt, "~/keg-link")
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(capturePath)
+	require.NoError(t, err)
+	got := strings.TrimSpace(string(raw))
+	want := filepath.Join(jailDir, "home", "alice", "work", "keg")
+	require.Equal(t, filepath.Clean(want), filepath.Clean(got))
 }

@@ -53,7 +53,7 @@ func NewGitAppPaths(ctx context.Context, rt *toolkit.Runtime, appname string) (*
 // Behavior:
 //   - If an option sets a value it is used as-is.
 //   - If Root is not set it is inferred from Runtime.Getwd().
-//   - ConfigRoot, DataRoot, StateRoot and CacheRoot use the corresponding
+//   - ConfigRoot, DataRoot, StateRoot, and CacheRoot use the corresponding
 //     user-scoped platform paths and are joined with DefaultAppName.
 func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if rt == nil {

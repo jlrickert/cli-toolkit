@@ -29,13 +29,13 @@ type LoggedEntry struct {
 // // MarshalJSON implements json.Marshaler for LoggedEntry.
 //
 //	func (le LoggedEntry) MarshalJSON() ([]byte, error) {
-//		type Alias LoggedEntry
+//		type Keg LoggedEntry
 //		return json.Marshal(&struct {
 //			Level string `json:"level"`
-//			*Alias
+//			*Keg
 //		}{
 //			Level: le.Level.String(),
-//			Alias: (*Alias)(&le),
+//			Keg: (*Keg)(&le),
 //		})
 //	}
 //

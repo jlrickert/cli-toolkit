@@ -3,7 +3,6 @@ package toolkit
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -126,14 +125,24 @@ func UserStatePath(env Env) (string, error) {
 var DefaultEditor = "nano"
 
 // Edit launches the user's editor to edit the provided file path.
-func Edit(ctx context.Context, path string) error {
+func Edit(ctx context.Context, rt *Runtime, path string) error {
 	if path == "" {
 		return fmt.Errorf("empty filepath")
 	}
 
-	editor := os.Getenv("VISUAL")
+	resolvedPath, err := rt.ResolvePath(path, true)
+	if err != nil {
+		return fmt.Errorf("resolve edit path: %w", err)
+	}
+	editorPath := resolvedPath
+	if jail := strings.TrimSpace(rt.GetJail()); jail != "" {
+		trimmed := strings.TrimPrefix(resolvedPath, string(filepath.Separator))
+		editorPath = filepath.Join(jail, trimmed)
+	}
+
+	editor := rt.Get("VISUAL")
 	if strings.TrimSpace(editor) == "" {
-		editor = os.Getenv("EDITOR")
+		editor = rt.Get("EDITOR")
 	}
 	if strings.TrimSpace(editor) == "" {
 		editor = DefaultEditor
@@ -141,12 +150,14 @@ func Edit(ctx context.Context, path string) error {
 
 	parts := strings.Fields(editor)
 	name := parts[0]
-	args := append(parts[1:], path)
+	args := append(parts[1:], editorPath)
 
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	stream := rt.Stream()
+	cmd.Stdin = stream.In
+	cmd.Stdout = stream.Out
+	cmd.Stderr = stream.Err
+	cmd.Env = rt.Environ()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running editor %q: %w", editor, err)

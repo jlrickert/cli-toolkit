@@ -1,7 +1,6 @@
 package clock
 
 import (
-	"context"
 	"sync"
 	"time"
 )
@@ -57,22 +56,15 @@ func (c *TestClock) Set(t time.Time) {
 var _ Clock = (*OsClock)(nil)
 var _ Clock = (*TestClock)(nil)
 
-type clockCtxKey int
+var defaultClock Clock = &OsClock{}
 
-var (
-	ctxClockKey  clockCtxKey
-	defaultClock = &OsClock{}
-)
+// Default returns the process default clock.
+func Default() Clock { return defaultClock }
 
-func WithClock(ctx context.Context, clock Clock) context.Context {
-	return context.WithValue(ctx, ctxClockKey, clock)
-}
-
-func ClockFromContext(ctx context.Context) Clock {
-	if v := ctx.Value(ctxClockKey); v != nil {
-		if clock, ok := v.(Clock); ok && clock != nil {
-			return clock
-		}
+// OrDefault returns c unless it is nil, in which case the default clock is returned.
+func OrDefault(c Clock) Clock {
+	if c != nil {
+		return c
 	}
 	return defaultClock
 }

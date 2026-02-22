@@ -2,7 +2,6 @@ package toolkit
 
 import (
 	"bytes"
-	"context"
 	"crypto/md5"
 	"fmt"
 )
@@ -26,28 +25,13 @@ func (m *MD5Hasher) Hash(data []byte) string {
 	return fmt.Sprintf("%x", sum[:])
 }
 
-// DefaultHasher is the fallback hasher used when none is provided via context.
+// DefaultHasher is the fallback hasher used when none is provided.
 var DefaultHasher Hasher = &MD5Hasher{}
 
-// context key type to avoid collisions
-type hasherKey struct{}
-
-// WithHasher returns a copy of ctx that carries the provided Hasher.
-// Use this to inject a custom hasher for tests or alternative hashing strategies.
-func WithHasher(ctx context.Context, h Hasher) context.Context {
-	return context.WithValue(ctx, hasherKey{}, h)
-}
-
-// HasherFromContext returns the Hasher stored in ctx. If ctx is nil or does not
-// contain a Hasher, DefaultHasher is returned.
-func HasherFromContext(ctx context.Context) Hasher {
-	if ctx == nil {
-		return DefaultHasher
-	}
-	if v := ctx.Value(hasherKey{}); v != nil {
-		if h, ok := v.(Hasher); ok && h != nil {
-			return h
-		}
+// OrDefaultHasher returns h unless it is nil, in which case DefaultHasher is returned.
+func OrDefaultHasher(h Hasher) Hasher {
+	if h != nil {
+		return h
 	}
 	return DefaultHasher
 }

@@ -68,10 +68,6 @@ func NewSandbox(t *testing.T, options *Options, opts ...Option) *Sandbox {
 	}
 
 	ctx := t.Context()
-	ctx = mylog.WithLogger(ctx, lg)
-	ctx = clock.WithClock(ctx, clk)
-	ctx = toolkit.WithHasher(ctx, hasher)
-	ctx = toolkit.WithStream(ctx, stream)
 
 	f := &Sandbox{
 		t:    t,
@@ -242,9 +238,6 @@ func (sandbox *Sandbox) testClock() *clock.TestClock {
 		if tc, ok := sandbox.rt.Clock().(*clock.TestClock); ok && tc != nil {
 			return tc
 		}
-	}
-	if tc, ok := clock.ClockFromContext(sandbox.ctx).(*clock.TestClock); ok && tc != nil {
-		return tc
 	}
 	sandbox.t.Fatalf("sandbox test clock is not available")
 	return nil

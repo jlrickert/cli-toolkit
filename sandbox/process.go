@@ -181,6 +181,7 @@ func (p *Process) Run(ctx context.Context, rt *toolkit.Runtime) *ProcessResult {
 	p.mu.Lock()
 
 	in := p.in
+	isPiped := in != nil
 	if in == nil {
 		if p.stdinPipe == nil || p.stdinW == nil {
 			p.stdinPipe, p.stdinW = io.Pipe()
@@ -219,7 +220,7 @@ func (p *Process) Run(ctx context.Context, rt *toolkit.Runtime) *ProcessResult {
 		In:      in,
 		Out:     out,
 		Err:     errOut,
-		IsPiped: in != nil,
+		IsPiped: isPiped,
 		IsTTY:   p.isTTY,
 	}
 	if err := procRt.SetStream(stream); err != nil {

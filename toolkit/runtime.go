@@ -266,7 +266,9 @@ func (rt *Runtime) SetClock(c clock.Clock) error {
 }
 
 // Logger returns the runtime logger dependency.
-func (rt *Runtime) Logger() *slog.Logger { return rt.logger }
+func (rt *Runtime) Logger() *slog.Logger {
+	return mylog.OrDefault(rt.logger)
+}
 
 // SetLogger updates the runtime logger dependency.
 func (rt *Runtime) SetLogger(lg *slog.Logger) error {

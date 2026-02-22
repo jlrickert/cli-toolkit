@@ -1,7 +1,6 @@
 package toolkit
 
 import (
-	"context"
 	"io"
 	"os"
 )
@@ -25,19 +24,6 @@ type Stream struct {
 	IsTTY bool
 }
 
-// streamCtxKey is a private context key type for storing Stream values.
-type streamCtxKey int
-
-// ctxStreamKey is the context key used to store and retrieve Stream values.
-var ctxStreamKey streamCtxKey
-
-// WithStream returns a copy of ctx that carries the provided Stream.
-// Use this to inject custom I/O streams for testing or alternative
-// stream configurations.
-func WithStream(ctx context.Context, s *Stream) context.Context {
-	return context.WithValue(ctx, ctxStreamKey, s)
-}
-
 // DefaultStream returns a Stream configured with the real process
 // standard input, output, and error streams. It detects whether stdin
 // is piped and whether stdout is a terminal.
@@ -51,14 +37,10 @@ func DefaultStream() *Stream {
 	}
 }
 
-// StreamFromContext returns the Stream stored in ctx. If ctx is nil
-// or does not contain a Stream, DefaultStream() is returned.
-func StreamFromContext(ctx context.Context) *Stream {
-	if v := ctx.Value(ctxStreamKey); v != nil {
-		if s, ok := v.(*Stream); ok && s != nil {
-			return s
-		}
+// OrDefaultStream returns s unless it is nil, in which case DefaultStream() is returned.
+func OrDefaultStream(s *Stream) *Stream {
+	if s != nil {
+		return s
 	}
-
 	return DefaultStream()
 }
