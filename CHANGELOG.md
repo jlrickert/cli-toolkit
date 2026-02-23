@@ -1,8 +1,17 @@
+## [1.0.0] - 2026-02-23
+
+### 🚀 Features
+
+- [**breaking**] Refactor Runtime to encapsulate dependencies and add filesystem jail support
 ## [0.4.0] - 2025-12-08
 
 ### 🚀 Features
 
 - Implement GetTempDir and ensure ExpandPath usage in OsEnv
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v0.4.0
 ## [0.3.0] - 2025-12-07
 
 ### 🚀 Features
