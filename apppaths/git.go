@@ -11,7 +11,7 @@ import (
 	"github.com/jlrickert/cli-toolkit/toolkit"
 )
 
-// findGitRoot attempts to use the git CLI to determine the repository top-level
+// FindGitRoot findGitRoot attempts to use the git CLI to determine the repository top-level
 // directory starting from 'start'. If that fails (git not available, not a git
 // worktree, or command error), it falls back to the original upward filesystem
 // search for a .git entry.

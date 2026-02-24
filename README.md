@@ -2,95 +2,74 @@
 
 Small, focused helpers for command line programs and tests. The library provides
 testable abstractions for environment handling, time, file system operations,
-logging, hashing, and common user paths. It is designed to make code easier to
-test without touching global process state.
+logging, hashing, and common user paths.
+
+Recent changes moved dependency wiring to an explicit `Runtime` model. Context
+values are no longer used for runtime dependencies like
+clock/logger/stream/hasher.
 
 ## Highlights
 
-- Testable environment via `TestEnv` that does not modify the OS env.
-- Explicit `Runtime` dependency container (Env, FS, clock, logger, stream, hasher).
-- Test clock via `TestClock` to deterministically control `Now()`.
-- File utilities for safe writes, path resolution, and test stdio.
-- Small logging helpers built on `log/slog` and a test handler.
-- Simple hashing interface with a default MD5 hasher.
-- Helpers for user-scoped directories and a `project` helper for app roots.
-- `Sandbox` for comprehensive test setup with jailed filesystem, test clock,
-  logger, and environment.
-- Pipeline execution with `Process` and `Pipeline` for testing complex I/O
-  scenarios.
+- Testable environment via `TestEnv` without mutating OS process env.
+- Explicit `Runtime` dependency container (`Env`, `FS`, clock, logger, stream,
+  hasher).
+- Defaulting helpers: `clock.OrDefault`, `mylog.OrDefault`,
+  `toolkit.OrDefaultStream`, and `toolkit.OrDefaultHasher`.
+- User-path helpers for config/data/state/cache plus repository-aware app paths.
+- `Sandbox` test harness with jailed filesystem, test clock, logger, and env.
+- `Process` and `Pipeline` helpers for testing CLI-style I/O flows.
 
 ## Packages
 
 ### Core Toolkit (`toolkit`)
 
-Main package with filesystem, environment, and I/O utilities:
+- `Env` interface with `OsEnv` and `TestEnv` implementations.
+- `FileSystem` interface with `OsFS` implementation.
+- `Runtime` as the main dependency hub (`NewRuntime`, `NewTestRuntime`,
+  `NewOsRuntime`).
+- `Stream` model for stdin/stdout/stderr with TTY/piped metadata.
+- Path/file helpers (`ResolvePath`, `AbsPath`, `AtomicWriteFile`, `Glob`, etc.).
 
-- **Environment**: `Env` interface with `OsEnv` and `TestEnv` implementations.
-- **Filesystem**: `FileSystem` interface with `OsFS` implementation.
-- **Runtime**: Explicit dependency wiring via `toolkit.Runtime`.
-- **Streams**: `Stream` struct modeling stdin/stdout/stderr with TTY and pipe
-  detection.
-- **Utilities**: File operations, editor launching, environment inspection, user
-  path helpers.
+### App Paths (`apppaths`, package name `appctx`)
 
-### App Context (`appctx`)
-
-Application root and configuration management:
-
-- **AppContext struct**: Manages repository root and platform-scoped paths
-  (config, data, state, cache).
-- **Options**: `WithRoot()`, `WithAutoRootDetect()` for git repository
-  detection, and per-path customization.
+- `AppPaths` struct for repository and platform-scoped app roots.
+- `NewAppPaths(rt, root, appname)` for explicit root wiring.
+- `NewGitAppPaths(ctx, rt, appname)` for git-root discovery with fallback
+  scanning.
 
 ### Logging (`mylog`)
 
-Structured logging built on `log/slog`:
-
-- **NewLogger()**: Create configured loggers with JSON/text output and level
-  control.
-- **TestHandler**: Captures log entries for test assertions.
-- **Utilities**: `ParseLevel()` for level names, `FindEntries()` and
-  `RequireEntry()` for test helpers.
+- `NewLogger` for text/JSON slog logger setup.
+- `NewTestLogger` + `TestHandler` for log assertions in tests.
+- `ParseLevel`, `FindEntries`, and `RequireEntry` test helpers.
+- `Default`/`OrDefault` logger helpers.
 
 ### Clock (`clock`)
 
-Time abstraction for testable code:
-
-- **Clock interface**: Abstract time operations.
-- **OsClock**: Production implementation using `time.Now()`.
-- **TestClock**: Manual time control for deterministic tests.
+- `Clock` interface with `OsClock` and `TestClock`.
+- `Default`/`OrDefault` clock helpers.
 
 ### Sandbox (`sandbox`)
 
-Comprehensive test environment bundling common setup:
-
-- **Sandbox**: Combines test logger, environment, clock, hasher, and jailed
-  filesystem.
-- **Process**: Isolated function execution with configurable I/O streams.
-- **Pipeline**: Sequential stage execution with piped I/O.
-- **Options**: Configure clock, environment, working directory, and test
-  fixtures.
+- `NewSandbox` for end-to-end test setup.
+- `WithEnv`, `WithEnvMap`, `WithWd`, `WithClock`, `WithFixture` options.
+- `Process` and `Pipeline` for isolated execution and piped stage testing.
 
 ## Install
 
-```
+```sh
 go get github.com/jlrickert/cli-toolkit
 ```
 
 ## Examples
 
-### Testable environment and variable expansion
+### Runtime + environment expansion
 
 ```go
-env := toolkit.NewTestEnv("/tmp/jail", "/home/alice", "alice")
-_ = env.Set("FOO", "bar")
-rt, _ := toolkit.NewRuntime(
-  toolkit.WithRuntimeEnv(env),
-  toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
-  toolkit.WithRuntimeJail("/tmp/jail"),
-)
+rt, _ := toolkit.NewTestRuntime("/tmp/jail", "/home/alice", "alice")
+_ = rt.Set("FOO", "bar")
 
-out := toolkit.ExpandEnv(rt.Env, "$FOO/baz")
+out := toolkit.ExpandEnv(rt, "$FOO/baz")
 // out == "bar/baz" on unix-like platforms
 ```
 
@@ -98,25 +77,22 @@ out := toolkit.ExpandEnv(rt.Env, "$FOO/baz")
 
 ```go
 tc := clock.NewTestClock(time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC))
-ctx := clock.WithClock(context.Background(), tc)
+c := clock.OrDefault(tc)
 
-now := clock.ClockFromContext(ctx).Now()
+now := c.Now()
 tc.Advance(2 * time.Hour)
-// Now reflects advanced time
+later := c.Now()
+_ = now
+_ = later
 ```
 
 ### Atomic file write
 
 ```go
-env := toolkit.NewTestEnv("/tmp/jail", "", "")
-rt, _ := toolkit.NewRuntime(
-  toolkit.WithRuntimeEnv(env),
-  toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
-  toolkit.WithRuntimeJail("/tmp/jail"),
-)
-err := rt.AtomicWriteFile("/tmp/some/file.txt", []byte("data"), 0644)
+rt, _ := toolkit.NewTestRuntime("/tmp/jail", "/home/alice", "alice")
+err := rt.AtomicWriteFile("some/file.txt", []byte("data"), 0o644)
 if err != nil {
-    // handle
+	// handle
 }
 ```
 
@@ -124,58 +100,84 @@ if err != nil {
 
 ```go
 lg, th := mylog.NewTestLogger(t, mylog.ParseLevel("debug"))
-ctx := mylog.WithLogger(context.Background(), lg)
-// use ctx in code under test and assert logs in `th`
+rt, _ := toolkit.NewTestRuntime(
+	"/tmp/jail",
+	"/home/alice",
+	"alice",
+	toolkit.WithRuntimeLogger(lg),
+)
+
+rt.Logger().Debug("example message")
+_ = th // assert captured entries in tests
 ```
 
-### App Context helper
+### App paths helper
 
 ```go
-aCtx, err := appctx.NewAppContext(rt, "/path/to/repo", "myapp")
-cfgRoot := aCtx.ConfigRoot
+paths, err := appctx.NewAppPaths(rt, "/path/to/repo", "myapp")
+if err != nil {
+	// handle
+}
+cfgRoot := paths.ConfigRoot
 // cfgRoot == <user-config-dir>/myapp
 ```
 
 ### Sandbox with test setup
 
 ```go
-sb := sandbox.NewSandbox(t, nil,
-  sandbox.WithClock(time.Now()),
-  sandbox.WithEnv("DEBUG", "true"))
-sb.MustWriteFile("config.txt", []byte("data"), 0644)
-// Use sb.Runtime() and sb in test
+sb := sandbox.NewSandbox(
+	t,
+	nil,
+	sandbox.WithClock(time.Now()),
+	sandbox.WithEnv("DEBUG", "true"),
+)
+sb.MustWriteFile("config.txt", []byte("data"), 0o644)
+// Use sb.Runtime() and sb in tests
 ```
+
+## Migration notes
+
+Context-based runtime dependency helpers were removed in favor of explicit
+runtime wiring:
+
+- `clock.WithClock` / `clock.ClockFromContext` -> use `toolkit.Runtime.Clock()`
+  or `clock.OrDefault`.
+- `mylog.WithLogger` / `mylog.LoggerFromContext` -> use
+  `toolkit.Runtime.Logger()` or `mylog.OrDefault`.
+- `toolkit.WithHasher` / `toolkit.HasherFromContext` -> use
+  `toolkit.Runtime.Hasher()` or `toolkit.OrDefaultHasher`.
+- `toolkit.WithStream` / `toolkit.StreamFromContext` -> use
+  `toolkit.Runtime.Stream()` or `toolkit.OrDefaultStream`.
 
 ## Testing
 
 Run all tests with:
 
-```
+```sh
 go test ./...
 ```
 
-Many helpers provide test-friendly variants and fixtures. See
-`sandbox.NewSandbox` for comprehensive test setup that wires a `TestEnv`,
-`TestClock`, test logger, hasher, and jailed filesystem.
+Many helpers provide test-friendly variants and fixtures. `sandbox.NewSandbox`
+wires `TestEnv`, `TestClock`, test logger, hasher, and jailed filesystem.
 
 ## Contributing
 
-Contributions and issues are welcome. Please open an issue or a pull request
-with a short description and tests for new behavior.
+Contributions and issues are welcome. Please open an issue or pull request with
+a short description and tests for new behavior.
 
 ## Files to inspect
 
-- `toolkit/` - core helpers (env, filesystem, streams, paths)
-- `appctx/` - app path helpers
+- `toolkit/` - core helpers (env, filesystem, runtime, streams, paths)
+- `apppaths/` - app path and git-root helpers (package name `appctx`)
 - `mylog/` - structured logging utilities
 - `clock/` - time abstractions
 - `sandbox/` - comprehensive test setup
 
 ## Notes
 
-- The library aims to be small and easy to audit. Tests avoid touching real OS
-  state by using `TestEnv` and `TestClock`.
-- See repository files for detailed behavior and examples.
+- The library aims to stay small and easy to audit.
+- Tests avoid touching real OS state via `TestEnv`, `TestClock`, and jailed
+  paths.
 - Runtime dependencies are passed explicitly via `toolkit.Runtime`.
 
 ## License
