@@ -1,8 +1,17 @@
+## [1.0.1] - 2026-02-24
+
+### 📚 Documentation
+
+- Update README and refactor runtime dependency wiring
 ## [1.0.0] - 2026-02-23
 
 ### 🚀 Features
 
 - [**breaking**] Refactor Runtime to encapsulate dependencies and add filesystem jail support
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v1.0.0
 ## [0.4.0] - 2025-12-08
 
 ### 🚀 Features
