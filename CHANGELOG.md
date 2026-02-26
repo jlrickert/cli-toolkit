@@ -1,8 +1,14 @@
+## [1.0.2] - 2026-02-26
+
+### 🐛 Bug Fixes
+
+- Downgrade git rev-parse fallback log level for non-git directories
 ## [1.0.1] - 2026-02-24
 
 ### 📚 Documentation
 
 - Update README and refactor runtime dependency wiring
+- *(release)* Update changelog for v1.0.1
 ## [1.0.0] - 2026-02-23
 
 ### 🚀 Features
