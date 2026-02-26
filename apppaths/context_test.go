@@ -1,10 +1,12 @@
 package appctx_test
 
 import (
+	"log/slog"
 	"path/filepath"
 	"testing"
 
 	proj "github.com/jlrickert/cli-toolkit/apppaths"
+	"github.com/jlrickert/cli-toolkit/mylog"
 	testutils "github.com/jlrickert/cli-toolkit/sandbox"
 	"github.com/jlrickert/cli-toolkit/toolkit"
 	"github.com/stretchr/testify/assert"
@@ -51,4 +53,24 @@ func TestNewAppPathsManualRootDefaults(t *testing.T) {
 	require.NoError(t, err)
 	expectedCache := filepath.Join(ucache, appname)
 	assert.Equal(t, expectedCache, p.CacheRoot)
+}
+
+func TestFindGitRoot_NonGitDirectoryLogsDebugFallback(t *testing.T) {
+	t.Parallel()
+
+	f := NewSandbox(t,
+		testutils.WithFixture("basic", "repo"),
+		testutils.WithWd("/home/testuser"),
+	)
+
+	lg, th := mylog.NewTestLogger(t, slog.LevelDebug)
+	require.NoError(t, f.Runtime().SetLogger(lg))
+
+	root := proj.FindGitRoot(f.Context(), f.Runtime(), "/home/testuser")
+	require.Equal(t, "", root)
+
+	warns := mylog.FindEntries(th, func(e mylog.LoggedEntry) bool {
+		return e.Level == slog.LevelWarn && e.Msg == "git rev-parse failed, falling back"
+	})
+	require.Empty(t, warns, "non-git directories should not emit warn logs for fallback")
 }

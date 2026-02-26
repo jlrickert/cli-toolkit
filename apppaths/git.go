@@ -2,6 +2,7 @@ package appctx
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -44,9 +45,13 @@ func FindGitRoot(ctx context.Context, rt *toolkit.Runtime, start string) string 
 		}
 		lg.Log(context.Background(), slog.LevelDebug, "git rev-parse returned empty output")
 	} else {
+		level := slog.LevelWarn
+		if isExpectedGitFallbackErr(err) {
+			level = slog.LevelDebug
+		}
 		lg.Log(
 			context.Background(),
-			slog.LevelWarn,
+			level,
 			"git rev-parse failed, falling back",
 			slog.String("start", start),
 			slog.Any("error", err),
@@ -73,4 +78,25 @@ func FindGitRoot(ctx context.Context, rt *toolkit.Runtime, start string) string 
 	}
 	lg.Log(context.Background(), slog.LevelDebug, "git root not found", slog.String("start", start))
 	return ""
+}
+
+func isExpectedGitFallbackErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "not a git repository") {
+		return true
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr := strings.ToLower(strings.TrimSpace(string(exitErr.Stderr)))
+		if strings.Contains(stderr, "not a git repository") {
+			return true
+		}
+	}
+
+	return false
 }
