@@ -16,12 +16,13 @@ import (
 // Context values are not used for mutable runtime dependencies; callers pass a
 // Runtime directly.
 type Runtime struct {
-	env    Env
-	fs     FileSystem
-	clock  clock.Clock
-	logger *slog.Logger
-	stream *Stream
-	hasher Hasher
+	env     Env
+	fs      FileSystem
+	clock   clock.Clock
+	logger  *slog.Logger
+	stream  *Stream
+	hasher  Hasher
+	process *ProcessInfo
 
 	// jail and wd are canonical state managed by Runtime and applied to both
 	// env and filesystem.
@@ -119,6 +120,14 @@ func WithRuntimeHasher(h Hasher) RuntimeOption {
 			return fmt.Errorf("runtime hasher cannot be nil")
 		}
 		rt.hasher = h
+		return nil
+	}
+}
+
+func WithProcessInfo(p ProcessInfo) RuntimeOption {
+	return func(rt *Runtime) error {
+		pi := p
+		rt.process = &pi
 		return nil
 	}
 }
@@ -244,6 +253,11 @@ func (rt *Runtime) Clone() *Runtime {
 		clone.stream = &streamCopy
 	}
 
+	if rt.process != nil {
+		processCopy := *rt.process
+		clone.process = &processCopy
+	}
+
 	return &clone
 }
 
@@ -293,6 +307,15 @@ func (rt *Runtime) SetStream(s *Stream) error {
 
 // Hasher returns the runtime hasher dependency.
 func (rt *Runtime) Hasher() Hasher { return rt.hasher }
+
+// Process returns the optional process identity for lock ownership.
+// Returns nil when no process info was configured.
+func (rt *Runtime) Process() *ProcessInfo {
+	if rt == nil {
+		return nil
+	}
+	return rt.process
+}
 
 // SetHasher updates the runtime hasher dependency.
 func (rt *Runtime) SetHasher(h Hasher) error {
