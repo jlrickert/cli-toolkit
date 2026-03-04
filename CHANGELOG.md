@@ -1,8 +1,17 @@
+## [1.1.0] - 2026-03-04
+
+### 🚀 Features
+
+- Add ProcessInfo to Runtime for lock ownership tracking
 ## [1.0.2] - 2026-02-26
 
 ### 🐛 Bug Fixes
 
 - Downgrade git rev-parse fallback log level for non-git directories
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v1.0.2
 ## [1.0.1] - 2026-02-24
 
 ### 📚 Documentation
