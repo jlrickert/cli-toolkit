@@ -245,6 +245,20 @@ func (fs *OsFS) Glob(pattern string) ([]string, error) {
 	return out, nil
 }
 
+func (fs *OsFS) AppendFile(path string, data []byte, perm os.FileMode) error {
+	host, err := fs.resolveHost(path, false)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(host, os.O_APPEND|os.O_CREATE|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
+}
+
 func (fs *OsFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	host, err := fs.resolveHost(path, false)
 	if err != nil {
