@@ -89,11 +89,24 @@ func isExpectedGitFallbackErr(err error) bool {
 	if strings.Contains(lower, "not a git repository") {
 		return true
 	}
+	// When running in a jailed environment, the virtual path may not exist
+	// on the host filesystem. This is an expected fallback scenario.
+	if strings.Contains(lower, "no such file or directory") {
+		return true
+	}
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		stderr := strings.ToLower(strings.TrimSpace(string(exitErr.Stderr)))
 		if strings.Contains(stderr, "not a git repository") {
+			return true
+		}
+		if strings.Contains(stderr, "no such file or directory") {
+			return true
+		}
+		// Exit code 128 from git typically means the directory is not
+		// a git repository or does not exist.
+		if exitErr.ExitCode() == 128 {
 			return true
 		}
 	}
