@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// Package std provides helpers for locating user-specific directories
-// (config, cache, data, state) in a cross-platform, testable way.
-
 // ExpandPath expands a leading tilde in the provided path to the user's home
 // directory obtained from env.
 func ExpandPath(env Env, p string) (string, error) {
