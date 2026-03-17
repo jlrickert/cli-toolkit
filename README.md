@@ -135,20 +135,6 @@ sb.MustWriteFile("config.txt", []byte("data"), 0o644)
 // Use sb.Runtime() and sb in tests
 ```
 
-## Migration notes
-
-Context-based runtime dependency helpers were removed in favor of explicit
-runtime wiring:
-
-- `clock.WithClock` / `clock.ClockFromContext` -> use `toolkit.Runtime.Clock()`
-  or `clock.OrDefault`.
-- `mylog.WithLogger` / `mylog.LoggerFromContext` -> use
-  `toolkit.Runtime.Logger()` or `mylog.OrDefault`.
-- `toolkit.WithHasher` / `toolkit.HasherFromContext` -> use
-  `toolkit.Runtime.Hasher()` or `toolkit.OrDefaultHasher`.
-- `toolkit.WithStream` / `toolkit.StreamFromContext` -> use
-  `toolkit.Runtime.Stream()` or `toolkit.OrDefaultStream`.
-
 ## Testing
 
 Run all tests with:
