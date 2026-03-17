@@ -16,9 +16,9 @@ import (
 // utilities to store/retrieve loggers from contexts, and a test handler that
 // captures structured log entries for assertions in tests.
 
-var (
-	DefaultLogger = NewDiscardLogger()
-)
+// defaultLogger is the package-level default logger used by Default() and
+// OrDefault(). It discards all output.
+var defaultLogger = NewDiscardLogger()
 
 // ParseLevel maps common textual level names to slog.Level. The function is
 // case-insensitive and ignores surrounding whitespace. If an unrecognized value
@@ -46,6 +46,8 @@ func ParseLevel(s string) slog.Level {
 //   - Out: destination writer for log output. If nil, os.Stdout is used.
 //   - Level: minimum logging level.
 //   - JSON: when true, output is JSON; otherwise, human-readable text is used.
+//   - Host: hostname included with each log entry. If empty, os.Hostname() is used.
+//   - PID: process ID included with each log entry. If zero, os.Getpid() is used.
 type LoggerConfig struct {
 	Version string
 
@@ -55,12 +57,18 @@ type LoggerConfig struct {
 	Level  slog.Level
 	JSON   bool // true => JSON output, false => text
 	Source bool
+
+	// Host overrides os.Hostname() when set. Use this in tests or when
+	// the hostname should be injected rather than discovered at runtime.
+	Host string
+
+	// PID overrides os.Getpid() when set. Use this in tests or
+	// containerized environments where the OS PID is not meaningful.
+	PID int
 }
 
-// NewLogger creates a configured *slog.Logger and a shutdown function.
-// The shutdown function is a no-op in this implementation but is returned to
-// make it easy to add asynchronous or file-based writers later. Call the
-// shutdown function on process exit if you add asynchronous writers.
+// NewLogger creates a configured *slog.Logger. Host and PID default to
+// os.Hostname() and os.Getpid() when not provided via LoggerConfig.
 func NewLogger(cfg LoggerConfig) *slog.Logger {
 	out := cfg.Out
 	if out == nil {
@@ -78,15 +86,22 @@ func NewLogger(cfg LoggerConfig) *slog.Logger {
 			&slog.HandlerOptions{Level: cfg.Level, AddSource: cfg.Source})
 	}
 
-	hn, _ := os.Hostname()
+	host := cfg.Host
+	if host == "" {
+		host, _ = os.Hostname()
+	}
+
+	pid := cfg.PID
+	if pid == 0 {
+		pid = os.Getpid()
+	}
 
 	logger := slog.New(handler).With(
 		slog.String("version", cfg.Version),
-		slog.String("host", hn),
-		slog.Int("pid", os.Getpid()),
+		slog.String("host", host),
+		slog.Int("pid", pid),
 	)
 
-	// shutdown noop for now
 	return logger
 }
 
@@ -96,13 +111,7 @@ func NewDiscardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Context helpers
-///////////////////////////////////////////////////////////////////////////////
-
-var defaultLogger = NewDiscardLogger()
-
-// Default returns the process default logger.
+// Default returns the package-level default logger (a discard logger).
 func Default() *slog.Logger { return defaultLogger }
 
 // OrDefault returns lg unless it is nil, in which case the default logger is returned.
@@ -113,9 +122,22 @@ func OrDefault(lg *slog.Logger) *slog.Logger {
 	return defaultLogger
 }
 
+// SlogWriter adapts a slog.Logger to an io.Writer. Each line written is
+// logged as a separate entry at the configured level.
 type SlogWriter struct {
 	lg    *slog.Logger
 	level slog.Level
+
+	// CallerDepth controls the stack skip for runtime.Caller when
+	// attaching caller information. Zero disables caller attribution.
+	// The default (when created via NewSlogWriter) is 5 which matches
+	// the typical log.Logger -> Write -> slog pipeline depth.
+	CallerDepth int
+}
+
+// NewSlogWriter creates a SlogWriter with sensible defaults.
+func NewSlogWriter(lg *slog.Logger, level slog.Level) *SlogWriter {
+	return &SlogWriter{lg: lg, level: level, CallerDepth: 5}
 }
 
 func (w SlogWriter) Write(p []byte) (int, error) {
@@ -124,13 +146,14 @@ func (w SlogWriter) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		// optionally include caller info
-		if _, file, lineNo, ok := runtime.Caller(5); ok {
-			caller := fmt.Sprintf("%s:%d", file, lineNo)
-			w.lg.With("caller", caller).Log(context.Background(), w.level, line)
-		} else {
-			w.lg.Log(context.Background(), w.level, line)
+		if w.CallerDepth > 0 {
+			if _, file, lineNo, ok := runtime.Caller(w.CallerDepth); ok {
+				caller := fmt.Sprintf("%s:%d", file, lineNo)
+				w.lg.With("caller", caller).Log(context.Background(), w.level, line)
+				continue
+			}
 		}
+		w.lg.Log(context.Background(), w.level, line)
 	}
 	return len(p), nil
 }
