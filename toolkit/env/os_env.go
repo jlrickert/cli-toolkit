@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/jlrickert/cli-toolkit/toolkit/jail"
 )
 
 // OsEnv is an Env implementation that delegates to the real process
@@ -13,13 +15,6 @@ import (
 // environment is required.
 type OsEnv struct {
 	jail string
-}
-
-func cleanJail(jail string) string {
-	if strings.TrimSpace(jail) == "" {
-		return ""
-	}
-	return filepath.Clean(jail)
 }
 
 func (o *OsEnv) Name() string {
@@ -30,8 +25,8 @@ func (o *OsEnv) GetJail() string {
 	return o.jail
 }
 
-func (o *OsEnv) SetJail(jail string) error {
-	o.jail = cleanJail(jail)
+func (o *OsEnv) SetJail(jailPath string) error {
+	o.jail = jail.CleanJail(jailPath)
 	return nil
 }
 

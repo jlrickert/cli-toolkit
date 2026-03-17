@@ -5,6 +5,16 @@ import (
 	"strings"
 )
 
+// CleanJail normalizes a jail path. Empty or whitespace-only values
+// return an empty string (meaning no jail). Non-empty values are cleaned
+// via filepath.Clean.
+func CleanJail(jail string) string {
+	if strings.TrimSpace(jail) == "" {
+		return ""
+	}
+	return filepath.Clean(jail)
+}
+
 // RemoveJailPrefix removes the jail prefix from a path and returns an
 // absolute path.
 func RemoveJailPrefix(jailPath, path string) string {
