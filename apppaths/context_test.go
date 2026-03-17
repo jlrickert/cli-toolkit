@@ -55,6 +55,44 @@ func TestNewAppPathsManualRootDefaults(t *testing.T) {
 	assert.Equal(t, expectedCache, p.CacheRoot)
 }
 
+func TestNewAppPaths_ErrorPropagation(t *testing.T) {
+	t.Parallel()
+
+	// Create a sandbox, then strip HOME and all XDG/APPDATA variables so that
+	// UserConfigPath (and the others) fall through to GetHome which returns an
+	// error when home is empty.
+	f := NewSandbox(t,
+		testutils.WithFixture("basic", "repo"),
+		testutils.WithWd("repo/basic"),
+	)
+
+	rt := f.Runtime()
+
+	// Unset home and platform path variables to force errors from path lookups.
+	rt.Unset("HOME")
+	rt.Unset("XDG_CONFIG_HOME")
+	rt.Unset("XDG_DATA_HOME")
+	rt.Unset("XDG_STATE_HOME")
+	rt.Unset("XDG_CACHE_HOME")
+	rt.Unset("APPDATA")
+	rt.Unset("LOCALAPPDATA")
+
+	// Verify home is now unset and returns an error
+	_, homeErr := rt.GetHome()
+	require.Error(t, homeErr, "GetHome should fail after unsetting HOME")
+
+	_, err := proj.NewAppPaths(rt, "/some/root", "myapp")
+	require.Error(t, err)
+
+	// The wrapped error should NOT be os.ErrNotExist. It should contain the
+	// actual underlying error message from GetHome (e.g. "home not set").
+	assert.Contains(t, err.Error(), "unable to find user config path")
+	assert.NotContains(t, err.Error(), "file does not exist",
+		"error should wrap the actual error, not os.ErrNotExist")
+	assert.Contains(t, err.Error(), "home not set",
+		"error should contain the underlying cause from GetHome")
+}
+
 func TestFindGitRoot_NonGitDirectoryLogsDebugFallback(t *testing.T) {
 	t.Parallel()
 
