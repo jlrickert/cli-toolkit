@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__tapper__create",
+      "mcp__tapper__edit"
+    ]
+  }
+}

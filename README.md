@@ -30,7 +30,7 @@ clock/logger/stream/hasher.
 - `Stream` model for stdin/stdout/stderr with TTY/piped metadata.
 - Path/file helpers (`ResolvePath`, `AbsPath`, `AtomicWriteFile`, `Glob`, etc.).
 
-### App Paths (`apppaths`, package name `appctx`)
+### App Paths (`appctx`)
 
 - `AppPaths` struct for repository and platform-scoped app roots.
 - `NewAppPaths(rt, root, appname)` for explicit root wiring.
@@ -154,7 +154,7 @@ a short description and tests for new behavior.
 ## Files to inspect
 
 - `toolkit/` - core helpers (env, filesystem, runtime, streams, paths)
-- `apppaths/` - app path and git-root helpers (package name `appctx`)
+- `appctx/` - app path and git-root helpers
 - `mylog/` - structured logging utilities
 - `clock/` - time abstractions
 - `sandbox/` - comprehensive test setup
