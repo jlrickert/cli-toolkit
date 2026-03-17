@@ -374,6 +374,51 @@ func TestOsFS_Glob_RelativeAndAbsolute_Jailed(t *testing.T) {
 	require.ElementsMatch(t, []string{rootedPath("glob", "a.txt"), rootedPath("glob", "b.txt")}, absMatches)
 }
 
+func TestOsFS_AppendFile_CreatesNewFile(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.AppendFile(rootedPath("log.txt"), []byte("line1\n"), 0o644))
+
+	data, err := os.ReadFile(filepath.Join(jail, "log.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "line1\n", string(data))
+}
+
+func TestOsFS_AppendFile_AppendsToExisting(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(jail, "log.txt"), []byte("line1\n"), 0o644))
+
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.AppendFile(rootedPath("log.txt"), []byte("line2\n"), 0o644))
+
+	data, err := os.ReadFile(filepath.Join(jail, "log.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "line1\nline2\n", string(data))
+}
+
+func TestRuntime_AppendFile_ThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	rt, err := toolkit.NewTestRuntime(jail, filepath.Join("/home", "testuser"), "testuser")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.AppendFile("log.txt", []byte("first\n"), 0o644))
+	require.NoError(t, rt.AppendFile("log.txt", []byte("second\n"), 0o644))
+
+	data, err := rt.ReadFile("log.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "first\nsecond\n", string(data))
+}
+
 func TestOsFS_ResolvePath_FollowSymlinkEscape_Jailed(t *testing.T) {
 	t.Parallel()
 

@@ -44,6 +44,9 @@ type FileSystem interface {
 	// Glob returns paths matching the provided pattern.
 	// Relative patterns are evaluated from the current working directory.
 	Glob(pattern string) ([]string, error)
+	// AppendFile appends data to path, creating the file if it does not exist.
+	// Relative paths are resolved from the current working directory.
+	AppendFile(path string, data []byte, perm os.FileMode) error
 	// AtomicWriteFile writes data to path atomically with the provided permissions.
 	// Relative paths are resolved from the current working directory.
 	AtomicWriteFile(path string, data []byte, perm os.FileMode) error

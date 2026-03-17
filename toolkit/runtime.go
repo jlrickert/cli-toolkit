@@ -594,6 +594,20 @@ func (rt *Runtime) WriteFile(rel string, data []byte, perm os.FileMode) error {
 	return rt.fs.WriteFile(path, data, perm)
 }
 
+func (rt *Runtime) AppendFile(rel string, data []byte, perm os.FileMode) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return err
+	}
+	if err := rt.fs.Mkdir(filepath.Dir(path), 0o755, true); err != nil {
+		return err
+	}
+	return rt.fs.AppendFile(path, data, perm)
+}
+
 func (rt *Runtime) Mkdir(rel string, perm os.FileMode, all bool) error {
 	if err := rt.Validate(); err != nil {
 		return err
