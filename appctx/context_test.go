@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	proj "github.com/jlrickert/cli-toolkit/apppaths"
+	proj "github.com/jlrickert/cli-toolkit/appctx"
 	"github.com/jlrickert/cli-toolkit/mylog"
 	testutils "github.com/jlrickert/cli-toolkit/sandbox"
 	"github.com/jlrickert/cli-toolkit/toolkit"

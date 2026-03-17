@@ -59,7 +59,7 @@ lg := rt.Logger()                                  // Access logger
   - `Runtime` as the main dependency hub
   - `Stream` struct modeling stdin/stdout/stderr
 
-- **`apppaths/`** (package `appctx`): Application path management
+- **`appctx/`**: Application path management
   - `AppPaths` struct holding repository root and platform-scoped paths
     (config, data, state, cache)
   - Auto-detection of git repository roots
@@ -138,7 +138,7 @@ See `docs/testing.md` for detailed examples.
 - `toolkit/runtime_impl.go` - `NewTestRuntime` and `NewOsRuntime`
 - `toolkit/env.go` - `Env` interface (alias to `toolkit/env` subpackage)
 - `toolkit/env_testenv.go` - `TestEnv` (alias to `toolkit/env` subpackage)
-- `apppaths/context.go` - `AppPaths` struct and initialization
+- `appctx/context.go` - `AppPaths` struct and initialization
 - `sandbox/sandbox.go` - `Sandbox` bundling test utilities
 - `sandbox/process.go` - `Process` for function isolation
 - `sandbox/pipeline.go` - `Pipeline` for multi-stage chains

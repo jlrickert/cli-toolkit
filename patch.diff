@@ -1,0 +1,256 @@
+--- a/toolkit/env_testenv.go
++++ b/toolkit/env_testenv.go
+@@ -3,6 +3,7 @@ package toolkit
+ import (
+ 	"errors"
+ 	"fmt"
++	"log/slog"
+ 	"maps"
+ 	"os"
+ 	"path/filepath"
+@@ -10,6 +11,8 @@ import (
+ 	"sort"
+ 	"strings"
+ )
++
++import "github.com/jlrickert/go-std/mylog"
+ 
+ // TestEnv is an in-memory Env implementation useful for tests. It does not
+ // touch the real process environment and therefore makes tests hermetic.
+@@ -164,6 +167,7 @@ func (m *TestEnv) Getwd() (string, error) {
+ // Setwd sets the TestEnv's PWD value to the provided directory.
+ func (m *TestEnv) Setwd(dir string) {
+ 	if m.data == nil {
++		// Debug: initializing data map for Setwd
+ 		m.data = make(map[string]string)
+ 	}
+ 	path, _ := m.ResolvePath(dir, false)
+@@ -172,18 +176,26 @@ func (m *TestEnv) Setwd(dir string) {
+ 
+ // ReadFile reads the named file from the filesystem view held by this TestEnv.
+ // When the receiver is nil the real filesystem is used.
+-func (m *TestEnv) ReadFile(rel string) ([]byte, error) {
++func (m *TestEnv) ReadFile(ctx context.Context, rel string) ([]byte, error) {
++	lg := mylog.LoggerFromContext(ctx)
+ 	resolved, err := m.ResolvePath(rel, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadFile: ResolvePath failed",
++			slog.String("rel", rel),
++			slog.Any("error", err))
+ 		return nil, err
+ 	}
+ 	path := filepath.Join(m.jail, resolved)
+ 	if !IsInJail(m.jail, path) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadFile: escape attempt detected",
++			slog.String("path", path),
++			slog.String("jail", m.jail))
+ 		return nil, fmt.Errorf("ReadFile outside of jail %s: %w", path, ErrEscapeAttempt)
+ 	}
+-	return os.ReadFile(path)
++	data, err := os.ReadFile(path)
++	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadFile: os.ReadFile failed",
++			slog.String("path", path),
++			slog.Any("error", err))
++	}
++	return data, err
+ }
+ 
+ // Remove removes the named file or directory. If all is true RemoveAll is used.
+ // When the receiver is nil the real filesystem is affected.
+-func (m *TestEnv) Remove(rel string, all bool) error {
++func (m *TestEnv) Remove(ctx context.Context, rel string, all bool) error {
++	lg := mylog.LoggerFromContext(ctx)
+ 	path, err := m.ResolvePath(rel, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Remove: ResolvePath failed",
++			slog.String("rel", rel),
++			slog.Bool("all", all),
++			slog.Any("error", err))
+ 		return err
+ 	}
+ 	path = filepath.Join(m.jail, path)
+ 	if !IsInJail(m.jail, path) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Remove: escape attempt detected",
++			slog.String("path", path),
++			slog.String("jail", m.jail))
+ 		return fmt.Errorf("Remove outside of jail %s: %w", path, ErrEscapeAttempt)
+ 	}
+ 	if all {
++		lg.Log(ctx, slog.LevelDebug, "TestEnv.Remove: removing all",
++			slog.String("path", path))
+ 		return os.RemoveAll(path)
+ 	}
++	lg.Log(ctx, slog.LevelDebug, "TestEnv.Remove: removing single",
++		slog.String("path", path))
+ 	return os.Remove(path)
+ }
+ 
+ // Rename renames (moves) a file or directory. When the receiver is nil the
+ // operation is performed on the real filesystem.
+-func (m *TestEnv) Rename(src string, dst string) error {
++func (m *TestEnv) Rename(ctx context.Context, src string, dst string) error {
++	lg := mylog.LoggerFromContext(ctx)
+ 	a, err := m.ResolvePath(src, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Rename: ResolvePath failed for src",
++			slog.String("src", src),
++			slog.Any("error", err))
+ 		return err
+ 	}
+ 	a = filepath.Join(m.jail, a)
+ 	if !IsInJail(m.jail, a) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Rename: escape attempt on src",
++			slog.String("src_path", a),
++			slog.String("jail", m.jail))
+ 		return fmt.Errorf("Rename src outside of jail %s: %w", a, ErrEscapeAttempt)
+ 	}
+ 	b, err := m.ResolvePath(dst, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Rename: ResolvePath failed for dst",
++			slog.String("dst", dst),
++			slog.Any("error", err))
+ 		return err
+ 	}
+ 	b = filepath.Join(m.jail, b)
+ 	if !IsInJail(m.jail, b) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Rename: escape attempt on dst",
++			slog.String("dst_path", b),
++			slog.String("jail", m.jail))
+ 		return fmt.Errorf("Rename dst outside of jail %s, %w", b, ErrEscapeAttempt)
+ 	}
++	lg.Log(ctx, slog.LevelDebug, "TestEnv.Rename: renaming",
++		slog.String("src", a),
++		slog.String("dst", b))
+ 	return os.Rename(a, b)
+ }
+ 
+ // Mkdir creates a directory. If all is true MkdirAll is used.
+-func (m *TestEnv) Mkdir(rel string, perm os.FileMode, all bool) error {
++func (m *TestEnv) Mkdir(ctx context.Context, rel string, perm os.FileMode, all bool) error {
++	lg := mylog.LoggerFromContext(ctx)
+ 	resolved, err := m.ResolvePath(rel, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Mkdir: ResolvePath failed",
++			slog.String("rel", rel),
++			slog.Bool("all", all),
++			slog.Any("error", err))
+ 		return err
+ 	}
+ 	p := filepath.Join(m.jail, resolved)
+ 	if !IsInJail(m.jail, p) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Mkdir: escape attempt detected",
++			slog.String("path", p),
++			slog.String("jail", m.jail))
+ 		return fmt.Errorf("Mkdir outside of jail: %s, %w", p, ErrEscapeAttempt)
+ 	}
+ 	if all {
++		lg.Log(ctx, slog.LevelDebug, "TestEnv.Mkdir: creating all directories",
++			slog.String("path", p),
++			slog.String("perm", perm.String()))
+ 		return os.MkdirAll(p, perm)
+ 	}
++	lg.Log(ctx, slog.LevelDebug, "TestEnv.Mkdir: creating single directory",
++		slog.String("path", p),
++		slog.String("perm", perm.String()))
+ 	return os.Mkdir(p, perm)
+ }
+ 
+ // WriteFile writes data to a file in the filesystem view held by this TestEnv.
+-func (m *TestEnv) WriteFile(name string, data []byte, perm os.FileMode) error {
++func (m *TestEnv) WriteFile(ctx context.Context, name string, data []byte, perm os.FileMode) error {
++	lg := mylog.LoggerFromContext(ctx)
+ 	p, err := m.ResolvePath(name, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.WriteFile: ResolvePath failed",
++			slog.String("name", name),
++			slog.Any("error", err))
+ 		return err
+ 	}
+ 	path := filepath.Join(m.jail, p)
+ 	if !IsInJail(m.jail, path) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.WriteFile: escape attempt detected",
++			slog.String("path", path),
++			slog.String("jail", m.jail))
+ 		return fmt.Errorf("WriteFile outside of jail %s: %w", path, ErrEscapeAttempt)
+ 	}
+-	return os.WriteFile(path, data, perm)
++	err = os.WriteFile(path, data, perm)
++	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.WriteFile: os.WriteFile failed",
++			slog.String("path", path),
++			slog.Int("dataSize", len(data)),
++			slog.String("perm", perm.String()),
++			slog.Any("error", err))
++	} else {
++		lg.Log(ctx, slog.LevelDebug, "TestEnv.WriteFile: success",
++			slog.String("path", path),
++			slog.Int("dataSize", len(data)))
++	}
++	return err
+ }
+ 
+ // ReadDir implements FileSystem.
+-func (m *TestEnv) ReadDir(name string) ([]os.DirEntry, error) {
++func (m *TestEnv) ReadDir(ctx context.Context, name string) ([]os.DirEntry, error) {
++	lg := mylog.LoggerFromContext(ctx)
+ 	p, err := m.ResolvePath(name, false)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadDir: ResolvePath failed",
++			slog.String("name", name),
++			slog.Any("error", err))
+ 		return nil, err
+ 	}
+ 	p = filepath.Join(m.jail, p)
+ 	if !IsInJail(m.jail, p) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadDir: escape attempt detected",
++			slog.String("path", p),
++			slog.String("jail", m.jail))
+ 		return nil, fmt.Errorf("ReadDir outside of jail %s: %w", p, ErrEscapeAttempt)
+ 	}
+-	return os.ReadDir(p)
++	entries, err := os.ReadDir(p)
++	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.ReadDir: os.ReadDir failed",
++			slog.String("path", p),
++			slog.Any("error", err))
++	} else {
++		lg.Log(ctx, slog.LevelDebug, "TestEnv.ReadDir: success",
++			slog.String("path", p),
++			slog.Int("count", len(entries)))
++	}
++	return entries, err
+ }
+ 
+ // Stat implements FileSystem.
+-func (m *TestEnv) Stat(rel string, followSymlinks bool) (os.FileInfo, error) {
++func (m *TestEnv) Stat(ctx context.Context, rel string, followSymlinks bool) (os.FileInfo, error) {
++	lg := mylog.LoggerFromContext(ctx)
+ 	path, err := m.ResolvePath(rel, followSymlinks)
+ 	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Stat: ResolvePath failed",
++			slog.String("rel", rel),
++			slog.Bool("followSymlinks", followSymlinks),
++			slog.Any("error", err))
+ 		return nil, err
+ 	}
+ 	path = filepath.Join(m.jail, path)
+ 	if !IsInJail(m.jail, path) {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Stat: escape attempt detected",
++			slog.String("path", path),
++			slog.String("jail", m.jail))
+ 		return nil, fmt.Errorf("Stat outside of jail %s: %w", path, ErrEscapeAttempt)
+ 	}
+-	return os.Stat(path)
++	info, err := os.Stat(path)
++	if err != nil {
++		lg.Log(ctx, slog.LevelError, "TestEnv.Stat: os.Stat failed",
++			slog.String("path", path),
++			slog.Any("error", err))
++	} else {
++		lg.Log(ctx, slog.LevelDebug, "TestEnv.Stat: success",
++			slog.String("path", path),
++			slog.Bool("isDir", info.IsDir()))
++	}
++	return info, err
+
