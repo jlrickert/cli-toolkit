@@ -46,13 +46,16 @@ type testingT interface {
 }
 
 // TestHandler captures structured entries so tests can assert on logs. It is
-// safe for concurrent use.
+// safe for concurrent use. When created via WithAttrs or WithGroup, the
+// handler shares the root handler's Entries slice so FindEntries and
+// RequireEntry work on the original handler returned by NewTestHandler.
 type TestHandler struct {
 	mu      sync.Mutex
 	Entries []LoggedEntry
 	T       testingT
 	attrs   []slog.Attr
 	filter  func(entry LoggedEntry) bool
+	parent  *TestHandler // non-nil for handlers created via WithAttrs/WithGroup
 }
 
 // NewTestHandler creates an empty TestHandler. Optionally pass a testing.T
@@ -67,9 +70,20 @@ func (h *TestHandler) Enabled(_ context.Context, _ slog.Level) bool {
 	return true
 }
 
+// root returns the root TestHandler by following the parent chain.
+func (h *TestHandler) root() *TestHandler {
+	r := h
+	for r.parent != nil {
+		r = r.parent
+	}
+	return r
+}
+
 // Handle captures the provided record as a LoggedEntry and appends it to the
-// handler's Entries slice. If a testingT was provided, a human-readable line
-// is also logged to the test output.
+// root handler's Entries slice. If a testingT was provided, a human-readable
+// line is also logged to the test output. When this handler was created via
+// WithAttrs or WithGroup, entries are stored on the root handler so that
+// FindEntries and RequireEntry work on the original handler.
 func (h *TestHandler) Handle(ctx context.Context, r slog.Record) error {
 	e := LoggedEntry{
 		Time:   r.Time,
@@ -91,24 +105,27 @@ func (h *TestHandler) Handle(ctx context.Context, r slog.Record) error {
 		return true
 	})
 
-	h.mu.Lock()
-	h.Entries = append(h.Entries, e)
-	h.mu.Unlock()
+	// Always append to the root handler's Entries slice.
+	root := h.root()
+	root.mu.Lock()
+	root.Entries = append(root.Entries, e)
+	root.mu.Unlock()
 
-	if h.filter == nil {
-		h.filter = func(entry LoggedEntry) bool { return false }
+	if root.filter == nil {
+		root.filter = func(entry LoggedEntry) bool { return false }
 	}
-	if h.T != nil && h.filter(e) {
+	if root.T != nil && root.filter(e) {
 		data, _ := json.Marshal(e)
 		indedentedData := bytes.Buffer{}
 		json.Indent(&indedentedData, data, "", "\t")
-		h.T.Logf(indedentedData.String())
+		root.T.Logf(indedentedData.String())
 	}
 	return nil
 }
 
 // WithAttrs returns a new handler with the provided attributes appended to
-// subsequent log entries.
+// subsequent log entries. The returned handler shares the parent's Entries
+// slice so FindEntries and RequireEntry work on the original handler.
 func (h *TestHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
 	copy(newAttrs, h.attrs)
@@ -116,15 +133,18 @@ func (h *TestHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &TestHandler{
 		T:     h.T,
 		attrs: newAttrs,
+		parent: h,
 	}
 }
 
 // WithGroup returns a new handler. Grouping is not directly modeled, but the
-// handler is returned as a new instance to maintain consistency with slog.Handler.
+// handler shares the parent's Entries slice so FindEntries works on the
+// original handler.
 func (h *TestHandler) WithGroup(_ string) slog.Handler {
 	return &TestHandler{
 		T:     h.T,
 		attrs: h.attrs,
+		parent: h,
 	}
 }
 
