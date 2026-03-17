@@ -1,8 +1,28 @@
+## [1.2.0] - 2026-03-17
+
+### 🚀 Features
+
+- Add AppendFile to FileSystem interface and Runtime
+- Add mylog tests (86% coverage) and fix TestHandler entry sharing
+
+### 🐛 Bug Fixes
+
+- Wrap actual error instead of os.ErrNotExist in NewAppPaths
+- Remove broken goreleaser config and release workflow
+
+### 📚 Documentation
+
+- Update CLAUDE.md and README.md to describe Runtime-based architecture
+- Add package-level godoc to all packages
 ## [1.1.0] - 2026-03-04
 
 ### 🚀 Features
 
 - Add ProcessInfo to Runtime for lock ownership tracking
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v1.1.0
 ## [1.0.2] - 2026-02-26
 
 ### 🐛 Bug Fixes
