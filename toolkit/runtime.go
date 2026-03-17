@@ -9,6 +9,7 @@ import (
 
 	"github.com/jlrickert/cli-toolkit/clock"
 	"github.com/jlrickert/cli-toolkit/mylog"
+	"github.com/jlrickert/cli-toolkit/toolkit/jail"
 )
 
 // Runtime is the explicit dependency container for commands and helpers.
@@ -132,18 +133,11 @@ func WithProcessInfo(p ProcessInfo) RuntimeOption {
 	}
 }
 
-func WithRuntimeJail(jail string) RuntimeOption {
+func WithRuntimeJail(jailPath string) RuntimeOption {
 	return func(rt *Runtime) error {
-		rt.jail = cleanJail(jail)
+		rt.jail = jail.CleanJail(jailPath)
 		return nil
 	}
-}
-
-func cleanJail(jail string) string {
-	if strings.TrimSpace(jail) == "" {
-		return ""
-	}
-	return filepath.Clean(jail)
 }
 
 func normalizePath(path string) string {
@@ -165,9 +159,9 @@ func (rt *Runtime) normalizeState() error {
 	}
 
 	if rt.jail == "" {
-		rt.jail = cleanJail(rt.env.GetJail())
+		rt.jail = jail.CleanJail(rt.env.GetJail())
 		if rt.jail == "" {
-			rt.jail = cleanJail(rt.fs.GetJail())
+			rt.jail = jail.CleanJail(rt.fs.GetJail())
 		}
 	}
 
@@ -417,12 +411,12 @@ func (rt *Runtime) GetJail() string {
 }
 
 // SetJail sets the canonical runtime jail and propagates it to both Env and FS.
-func (rt *Runtime) SetJail(jail string) error {
+func (rt *Runtime) SetJail(jailPath string) error {
 	if err := rt.Validate(); err != nil {
 		return err
 	}
 
-	rt.jail = cleanJail(jail)
+	rt.jail = jail.CleanJail(jailPath)
 	if err := rt.fs.SetJail(rt.jail); err != nil {
 		return err
 	}

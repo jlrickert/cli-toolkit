@@ -100,7 +100,7 @@ func (env *TestEnv) GetJail() string {
 }
 
 func (env *TestEnv) SetJail(jailPath string) error {
-	newJail := cleanJail(jailPath)
+	newJail := jail.CleanJail(jailPath)
 	oldJail := env.jail
 	env.jail = newJail
 
