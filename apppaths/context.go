@@ -3,7 +3,6 @@ package appctx
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/jlrickert/cli-toolkit/toolkit"
@@ -66,7 +65,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if path, err := toolkit.UserConfigPath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user config path: %w",
-			os.ErrNotExist,
+			err,
 		)
 	} else {
 		p.ConfigRoot = filepath.Join(path, p.Appname)
@@ -75,7 +74,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if path, err := toolkit.UserDataPath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user data path: %w",
-			os.ErrNotExist,
+			err,
 		)
 	} else {
 		p.DataRoot = filepath.Join(path, p.Appname)
@@ -84,7 +83,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if path, err := toolkit.UserStatePath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user state root: %w",
-			os.ErrNotExist,
+			err,
 		)
 	} else {
 		p.StateRoot = filepath.Join(path, p.Appname)
@@ -93,7 +92,7 @@ func NewAppPaths(rt *toolkit.Runtime, root, appname string) (*AppPaths, error) {
 	if path, err := toolkit.UserCachePath(rt); err != nil {
 		return nil, fmt.Errorf(
 			"unable to find user cache root: %w",
-			os.ErrNotExist,
+			err,
 		)
 	} else {
 		p.CacheRoot = filepath.Join(path, p.Appname)
