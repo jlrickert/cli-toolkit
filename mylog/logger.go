@@ -11,11 +11,6 @@ import (
 	"log/slog"
 )
 
-// Package std provides small logging utilities built on slog for tests and
-// simple applications. It includes helpers to create configured loggers,
-// utilities to store/retrieve loggers from contexts, and a test handler that
-// captures structured log entries for assertions in tests.
-
 // defaultLogger is the package-level default logger used by Default() and
 // OrDefault(). It discards all output.
 var defaultLogger = NewDiscardLogger()
