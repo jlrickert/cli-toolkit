@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,14 @@ func (fs *OsFS) AppendFile(path string, data []byte, perm os.FileMode) error {
 	defer f.Close()
 	_, err = f.Write(data)
 	return err
+}
+
+func (fs *OsFS) OpenFile(path string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+	host, err := fs.resolveHost(path, false)
+	if err != nil {
+		return nil, err
+	}
+	return os.OpenFile(host, flag, perm)
 }
 
 func (fs *OsFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {

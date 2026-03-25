@@ -2,6 +2,7 @@ package toolkit
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -606,6 +607,20 @@ func (rt *Runtime) AppendFile(rel string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return rt.fs.AppendFile(path, data, perm)
+}
+
+func (rt *Runtime) OpenFile(rel string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+	if err := rt.Validate(); err != nil {
+		return nil, err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := rt.fs.Mkdir(filepath.Dir(path), 0o755, true); err != nil {
+		return nil, err
+	}
+	return rt.fs.OpenFile(path, flag, perm)
 }
 
 func (rt *Runtime) Mkdir(rel string, perm os.FileMode, all bool) error {
