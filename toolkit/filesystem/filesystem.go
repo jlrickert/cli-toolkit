@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -47,6 +48,10 @@ type FileSystem interface {
 	// AppendFile appends data to path, creating the file if it does not exist.
 	// Relative paths are resolved from the current working directory.
 	AppendFile(path string, data []byte, perm os.FileMode) error
+	// OpenFile opens the file at path with the given flags and permissions,
+	// returning an io.WriteCloser. Callers must close the returned writer.
+	// Relative paths are resolved from the current working directory.
+	OpenFile(path string, flag int, perm os.FileMode) (io.WriteCloser, error)
 	// AtomicWriteFile writes data to path atomically with the provided permissions.
 	// Relative paths are resolved from the current working directory.
 	AtomicWriteFile(path string, data []byte, perm os.FileMode) error
