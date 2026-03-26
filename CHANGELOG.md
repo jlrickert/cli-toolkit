@@ -1,3 +1,8 @@
+## [1.3.0] - 2026-03-26
+
+### 🚀 Features
+
+- Add OpenFile method to FileSystem interface
 ## [1.2.0] - 2026-03-17
 
 ### 🚀 Features
@@ -14,6 +19,7 @@
 
 - Update CLAUDE.md and README.md to describe Runtime-based architecture
 - Add package-level godoc to all packages
+- *(release)* Update changelog for v1.2.0
 ## [1.1.0] - 2026-03-04
 
 ### 🚀 Features
