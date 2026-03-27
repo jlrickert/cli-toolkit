@@ -28,6 +28,12 @@ type EnvProvider struct {
 	Keys []string
 }
 
+// Load reads environment variables matching Prefix+key for each key in Keys.
+// The getenv parameter accepts a func(string) string for env var lookup,
+// keeping cfgcascade decoupled from any specific env abstraction. Runtime-
+// managed applications should pass their sandboxed lookup (e.g.
+// rt.Env().Get) to preserve test isolation. If getenv is nil, falls back
+// to os.Getenv for standalone use outside Runtime-managed applications.
 func (p *EnvProvider) Load(getenv func(string) string) (map[string]string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
