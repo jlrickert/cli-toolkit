@@ -1,8 +1,21 @@
+## [1.4.0] - 2026-03-27
+
+### 🚀 Features
+
+- Add cfgcascade package for hierarchical config resolution
+
+### 📚 Documentation
+
+- Document getenv nil fallback in EnvProvider.Load
 ## [1.3.0] - 2026-03-26
 
 ### 🚀 Features
 
 - Add OpenFile method to FileSystem interface
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v1.3.0
 ## [1.2.0] - 2026-03-17
 
 ### 🚀 Features
