@@ -18,12 +18,12 @@ import (
 // Context values are not used for mutable runtime dependencies; callers pass a
 // Runtime directly.
 type Runtime struct {
-	env     Env
-	fs      FileSystem
-	clock   clock.Clock
-	logger  *slog.Logger
-	stream  *Stream
-	hasher  Hasher
+	env    Env
+	fs     FileSystem
+	clock  clock.SchedulingClock
+	logger *slog.Logger
+	stream *Stream
+	hasher Hasher
 	process *ProcessInfo
 
 	// jail and wd are canonical state managed by Runtime and applied to both
@@ -86,12 +86,18 @@ func WithRuntimeFileSystem(fs FileSystem) RuntimeOption {
 	}
 }
 
+// WithRuntimeClock sets the runtime clock. If c implements [clock.SchedulingClock]
+// it is stored directly; otherwise it is wrapped in an adapter that provides
+// OS-backed scheduling (time.NewTicker, time.After, time.AfterFunc) while
+// delegating Now() to c. The adapter is appropriate for production clocks
+// (OsClock) but should not be used with test clocks that need deterministic
+// scheduling — use a [clock.TestClock] which already implements SchedulingClock.
 func WithRuntimeClock(c clock.Clock) RuntimeOption {
 	return func(rt *Runtime) error {
 		if c == nil {
 			return fmt.Errorf("runtime clock cannot be nil")
 		}
-		rt.clock = c
+		rt.clock = clock.ToSchedulingClock(c)
 		return nil
 	}
 }
@@ -262,15 +268,22 @@ func (rt *Runtime) Env() Env { return rt.env }
 // FS returns the runtime FileSystem dependency.
 func (rt *Runtime) FS() FileSystem { return rt.fs }
 
-// Clock returns the runtime clock dependency.
+// Clock returns the runtime clock dependency as a [clock.Clock].
+// For scheduling operations use [Runtime.SchedulingClock].
 func (rt *Runtime) Clock() clock.Clock { return rt.clock }
 
-// SetClock updates the runtime clock dependency.
+// SchedulingClock returns the runtime clock as a [clock.SchedulingClock],
+// providing access to NewTicker, After, AfterFunc, and Since in addition to Now.
+func (rt *Runtime) SchedulingClock() clock.SchedulingClock { return rt.clock }
+
+// SetClock updates the runtime clock dependency. If c implements
+// [clock.SchedulingClock] it is stored directly; otherwise it is wrapped with
+// OS-backed scheduling (see [WithRuntimeClock]).
 func (rt *Runtime) SetClock(c clock.Clock) error {
 	if c == nil {
 		return fmt.Errorf("runtime clock cannot be nil")
 	}
-	rt.clock = c
+	rt.clock = clock.ToSchedulingClock(c)
 	return nil
 }
 
