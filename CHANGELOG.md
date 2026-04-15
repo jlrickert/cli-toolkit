@@ -1,3 +1,8 @@
+## [1.5.0] - 2026-04-15
+
+### 🚀 Features
+
+- Add scheduling primitives to clock abstraction
 ## [1.4.0] - 2026-03-27
 
 ### 🚀 Features
@@ -7,6 +12,7 @@
 ### 📚 Documentation
 
 - Document getenv nil fallback in EnvProvider.Load
+- *(release)* Update changelog for v1.4.0
 ## [1.3.0] - 2026-03-26
 
 ### 🚀 Features
