@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -125,7 +126,11 @@ func (fs *OsFS) ResolvePath(path string, followSymlinks bool) (string, error) {
 }
 
 func (fs *OsFS) ReadFile(path string) ([]byte, error) {
-	host, err := fs.resolveHost(path, false)
+	// ReadFile must reject final-component symlinks pointing outside the jail
+	// (os.ReadFile follows symlinks at the OS level), so we use
+	// followSymlinks=true. resolveHost(path, true) runs EvalSymlinks on the
+	// full path and re-checks IsInJail on the canonicalized result.
+	host, err := fs.resolveHost(path, true)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +138,11 @@ func (fs *OsFS) ReadFile(path string) ([]byte, error) {
 }
 
 func (fs *OsFS) WriteFile(path string, data []byte, perm os.FileMode) error {
-	host, err := fs.resolveHost(path, false)
+	// os.WriteFile follows an existing final-component symlink, so we need
+	// resolveHostForOpen rather than plain resolveHostForCreate: it adds the
+	// final-symlink check on top of parent canonicalization and rejects
+	// /jail/sneaky -> /outside/secret before any data is written.
+	host, err := fs.resolveHostForOpen(path)
 	if err != nil {
 		return err
 	}
@@ -141,7 +150,9 @@ func (fs *OsFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 }
 
 func (fs *OsFS) Mkdir(path string, perm os.FileMode, all bool) error {
-	host, err := fs.resolveHost(path, false)
+	// Mkdir creates the final component; use the parent-canonicalizing
+	// resolver to block parent-traversal escapes through symlinked dirs.
+	host, err := fs.resolveHostForCreate(path)
 	if err != nil {
 		return err
 	}
@@ -152,7 +163,12 @@ func (fs *OsFS) Mkdir(path string, perm os.FileMode, all bool) error {
 }
 
 func (fs *OsFS) Remove(path string, all bool) error {
-	host, err := fs.resolveHost(path, false)
+	// Remove operates on the final component without following it (POSIX
+	// unlink/rmdir do not follow), but parent-component symlinks would let an
+	// attacker delete files outside the jail. resolveHostForCreate
+	// canonicalizes the parent so /jail/sneaky -> /outside, then
+	// Remove(/jail/sneaky/foo) is rejected.
+	host, err := fs.resolveHostForCreate(path)
 	if err != nil {
 		return err
 	}
@@ -163,11 +179,13 @@ func (fs *OsFS) Remove(path string, all bool) error {
 }
 
 func (fs *OsFS) Rename(src, dst string) error {
-	srcHost, err := fs.resolveHost(src, false)
+	// Both endpoints must canonicalize parents to block parent-traversal
+	// escapes. The final components are not followed by os.Rename.
+	srcHost, err := fs.resolveHostForCreate(src)
 	if err != nil {
 		return err
 	}
-	dstHost, err := fs.resolveHost(dst, false)
+	dstHost, err := fs.resolveHostForCreate(dst)
 	if err != nil {
 		return err
 	}
@@ -175,24 +193,34 @@ func (fs *OsFS) Rename(src, dst string) error {
 }
 
 func (fs *OsFS) Stat(path string, followSymlinks bool) (os.FileInfo, error) {
-	// Pass followSymlinks through to resolveHost so the jail check runs
-	// EvalSymlinks and re-checks IsInJail when the caller wants follow
-	// semantics. Without this, an in-jail symlink to an outside target would
-	// pass the lexical jail check and os.Stat would leak the target's
-	// FileInfo. The followSymlinks=false path keeps lexical-only resolution
-	// because os.Lstat does not follow symlinks at the OS level.
-	host, err := fs.resolveHost(path, followSymlinks)
+	// followSymlinks=true: resolveHost runs EvalSymlinks on the full path so
+	// an in-jail symlink to an outside target is rejected (otherwise os.Stat
+	// would leak the target's FileInfo).
+	//
+	// followSymlinks=false: os.Lstat does not follow the FINAL component, but
+	// parent-traversal symlinks would still let the OS resolve through them.
+	// resolveHostForCreate canonicalizes the parent and re-checks IsInJail,
+	// blocking the parent-traversal escape while leaving the final component
+	// alone for Lstat to inspect as-is.
+	if followSymlinks {
+		host, err := fs.resolveHost(path, true)
+		if err != nil {
+			return nil, err
+		}
+		return os.Stat(host)
+	}
+	host, err := fs.resolveHostForCreate(path)
 	if err != nil {
 		return nil, err
-	}
-	if followSymlinks {
-		return os.Stat(host)
 	}
 	return os.Lstat(host)
 }
 
 func (fs *OsFS) ReadDir(path string) ([]os.DirEntry, error) {
-	host, err := fs.resolveHost(path, false)
+	// os.ReadDir follows symlinks (it stats the target to enumerate dir
+	// entries). Use followSymlinks=true so a final-component symlink to an
+	// outside dir is rejected, not silently enumerated.
+	host, err := fs.resolveHost(path, true)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +228,22 @@ func (fs *OsFS) ReadDir(path string) ([]os.DirEntry, error) {
 }
 
 func (fs *OsFS) Symlink(oldname, newname string) error {
+	// oldname is the symlink's target text. Resolve it lexically (no parent
+	// canonicalization, no EvalSymlinks) so the resulting symlink works
+	// inside the jail: a virtual target like "/home/x/file" must be stored
+	// as the host path "<jail>/home/x/file" or later follow operations would
+	// look outside the jail. resolveHost(_, false) does exactly this lexical
+	// jail-to-host translation. The target need not exist at link creation.
+	//
+	// newname is where the symlink INODE is created. It must use
+	// resolveHostForCreate so a parent-traversal escape — e.g.
+	// /jail/sneaky -> /outside, then Symlink(target, /jail/sneaky/foo) —
+	// is rejected before os.Symlink plants the link in the wrong place.
 	oldHost, err := fs.resolveHost(oldname, false)
 	if err != nil {
 		return err
 	}
-	newHost, err := fs.resolveHost(newname, false)
+	newHost, err := fs.resolveHostForCreate(newname)
 	if err != nil {
 		return err
 	}
@@ -225,6 +264,29 @@ func (fs *OsFS) Glob(pattern string) ([]string, error) {
 	virtualPattern = filepath.Clean(virtualPattern)
 
 	hostPattern := fs.hostPath(virtualPattern)
+
+	// Block parent-traversal escapes in the pattern's literal prefix. Split
+	// the pattern at the first glob meta-character; the segment before it is
+	// the literal directory prefix that filepath.Glob will traverse. We
+	// canonicalize the WHOLE prefix (resolveHost with followSymlinks=true)
+	// because Glob's semantics imply the prefix must already exist as a
+	// directory; if the prefix itself is a symlink to outside, every match
+	// would be out-of-jail and the per-match filter below would silently
+	// drop everything. Erroring early gives a clearer signal.
+	if jailPath := fs.GetJail(); strings.TrimSpace(jailPath) != "" {
+		literalPrefix := globLiteralPrefix(virtualPattern)
+		if literalPrefix != "" && literalPrefix != string(filepath.Separator) {
+			if _, perr := fs.resolveHost(literalPrefix, true); perr != nil {
+				// Only short-circuit on jail-escape errors; other errors
+				// (e.g. the prefix legitimately not existing yet) should let
+				// filepath.Glob proceed and return its empty result.
+				if errors.Is(perr, jail.ErrEscapeAttempt) {
+					return nil, perr
+				}
+			}
+		}
+	}
+
 	matches, err := filepath.Glob(hostPattern)
 	if err != nil {
 		return nil, err
@@ -254,7 +316,10 @@ func (fs *OsFS) Glob(pattern string) ([]string, error) {
 }
 
 func (fs *OsFS) AppendFile(path string, data []byte, perm os.FileMode) error {
-	host, err := fs.resolveHost(path, false)
+	// O_APPEND|O_CREATE|O_WRONLY follows an existing final-component symlink,
+	// so use resolveHostForOpen to block both parent-traversal AND final-
+	// component symlink escapes.
+	host, err := fs.resolveHostForOpen(path)
 	if err != nil {
 		return err
 	}
@@ -268,7 +333,11 @@ func (fs *OsFS) AppendFile(path string, data []byte, perm os.FileMode) error {
 }
 
 func (fs *OsFS) OpenFile(path string, flag int, perm os.FileMode) (io.WriteCloser, error) {
-	host, err := fs.resolveHost(path, false)
+	// os.OpenFile follows an existing final-component symlink unless the
+	// caller passes O_NOFOLLOW. We treat all callers as if they may follow,
+	// so resolveHostForOpen runs the parent canonicalization plus the final-
+	// symlink check, blocking both escape shapes.
+	host, err := fs.resolveHostForOpen(path)
 	if err != nil {
 		return nil, err
 	}
@@ -298,10 +367,12 @@ func (fs *OsFS) Chown(path string, uid, gid int) error {
 }
 
 func (fs *OsFS) Lchown(path string, uid, gid int) error {
-	// os.Lchown does NOT follow symlinks (POSIX), so a lexical jail check is
-	// sufficient: the operation acts on the symlink inode itself, never its
-	// target. Keeping followSymlinks=false here is intentional and required.
-	host, err := fs.resolveHost(path, false)
+	// os.Lchown does NOT follow symlinks on the FINAL component (POSIX), so
+	// the operation acts on the symlink inode itself rather than its target.
+	// However, parent-component symlinks ARE resolved by the OS, so we must
+	// canonicalize the parent through resolveHostForCreate to block escapes
+	// of the form /jail/sneaky -> /outside, then Lchown(/jail/sneaky/foo).
+	host, err := fs.resolveHostForCreate(path)
 	if err != nil {
 		return err
 	}
@@ -319,7 +390,14 @@ func (fs *OsFS) Chtimes(path string, atime, mtime time.Time) error {
 }
 
 func (fs *OsFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	host, err := fs.resolveHost(path, false)
+	// AtomicWriteFile writes to a temp file in the same directory then
+	// renames into place. The rename overwrites any existing final-component
+	// symlink (replacing it with a regular file) but the temp file creation
+	// happens in the parent dir, which must be canonicalized to defeat
+	// parent-traversal escapes. Use resolveHostForOpen so the final-symlink
+	// check rejects /jail/sneaky -> /outside before any temp file is even
+	// created in the wrong place.
+	host, err := fs.resolveHostForOpen(path)
 	if err != nil {
 		return err
 	}
@@ -344,6 +422,160 @@ func (fs *OsFS) resolveHost(path string, followSymlinks bool) (string, error) {
 		return "", err
 	}
 	return fs.hostPath(resolved), nil
+}
+
+// resolveHostForCreate returns a host path safe for operations whose final
+// component (a) may not exist yet (create-mode) or (b) must NOT be followed
+// at the OS level. It canonicalizes the parent directory via EvalSymlinks
+// and re-checks IsInJail on the canonicalized parent, then re-attaches the
+// original base name. This blocks the parent-traversal escape shape:
+//
+//	/jail/sneaky -> /outside  (symlink in jail)
+//	op(/jail/sneaky/foo)      (OS resolves the parent symlink before reaching foo)
+//
+// For methods that DO follow the final symlink at the OS level AND require
+// the final to exist (e.g. Chmod, ReadFile, ReadDir, Stat-with-follow), use
+// resolveHost(path, true) instead. For open-mode methods that may create but
+// also follow an existing final symlink (WriteFile, OpenFile, AppendFile,
+// AtomicWriteFile), use resolveHostForOpen, which adds a final-symlink check
+// on top of resolveHostForCreate.
+//
+// When the parent does not yet exist, the helper walks up the chain to find
+// the longest existing ancestor, EvalSymlinks that, and re-attaches the
+// missing intermediate segments lexically. This covers MkdirAll-style cases
+// where several intermediate directories are about to be created.
+func (fs *OsFS) resolveHostForCreate(path string) (string, error) {
+	// Resolve virtually first to get jail-relative form and run the lexical
+	// IsInJail check against the unresolved path. resolveVirtual with
+	// followSymlinks=false never errors on missing components.
+	resolved, err := fs.resolveVirtual(path, false)
+	if err != nil {
+		return "", err
+	}
+	host := fs.hostPath(resolved)
+
+	jailPath := fs.GetJail()
+	if strings.TrimSpace(jailPath) == "" {
+		// No jail: nothing to enforce. Return the lexical host path.
+		return host, nil
+	}
+
+	// Canonicalize the jail prefix once so the post-canonicalization
+	// IsInJail check is meaningful even when the jail's parent contains
+	// symlinks (e.g. macOS /var -> /private/var). Fall back to raw jail if
+	// EvalSymlinks fails (jail may not exist yet).
+	canonicalJail := jailPath
+	if evaledJail, evalErr := filepath.EvalSymlinks(jailPath); evalErr == nil {
+		canonicalJail = evaledJail
+	}
+
+	// Special case: host == jail root. Nothing to canonicalize; return as-is.
+	if filepath.Clean(host) == filepath.Clean(jailPath) {
+		return host, nil
+	}
+
+	parent := filepath.Dir(host)
+	base := filepath.Base(host)
+
+	// Walk up from parent to find the longest existing ancestor. We need an
+	// existing path to EvalSymlinks; we will reattach the missing tail
+	// segments lexically. This handles MkdirAll where several parents are
+	// about to be created at once.
+	missing := []string{base}
+	cur := parent
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			// Permission denied or other I/O error: do not silently treat as
+			// missing; bubble up so the caller sees the real failure.
+			return "", err
+		}
+		// cur does not exist; record its base and walk up.
+		next := filepath.Dir(cur)
+		if next == cur {
+			// Reached filesystem root without finding an existing ancestor.
+			// This should not happen since the host root always exists, but
+			// guard against an infinite loop.
+			break
+		}
+		missing = append([]string{filepath.Base(cur)}, missing...)
+		cur = next
+	}
+
+	// EvalSymlinks the existing ancestor. If it fails, fall back to the
+	// lexical ancestor; the IsInJail check below will still run.
+	canonicalAncestor := cur
+	if evaled, evalErr := filepath.EvalSymlinks(cur); evalErr == nil {
+		canonicalAncestor = evaled
+	}
+
+	if !jail.IsInJail(canonicalJail, canonicalAncestor) {
+		return "", fmt.Errorf("resolve path outside jail %s: %w", canonicalAncestor, jail.ErrEscapeAttempt)
+	}
+
+	// Reattach missing segments lexically. Since the canonicalized ancestor
+	// is in jail and the segments are simple base names (no separators), the
+	// reassembled path stays in jail.
+	out := canonicalAncestor
+	for _, seg := range missing {
+		out = filepath.Join(out, seg)
+	}
+	return filepath.Clean(out), nil
+}
+
+// resolveHostForOpen returns a host path safe for operations that may create
+// the final component but ALSO follow an existing final-component symlink
+// at the OS level (WriteFile, OpenFile, AppendFile, AtomicWriteFile).
+//
+// It first runs resolveHostForCreate to canonicalize the parent, then, if
+// the final component exists and is a symlink, runs EvalSymlinks on the
+// full path and re-checks IsInJail on the canonicalized result. This blocks
+// the final-component-symlink escape:
+//
+//	/jail/sneaky -> /outside/secret  (symlink in jail)
+//	WriteFile(/jail/sneaky, data)    (os.WriteFile follows -> writes /outside/secret)
+//
+// Non-existent finals and non-symlink finals are returned with parent
+// canonicalization only.
+func (fs *OsFS) resolveHostForOpen(path string) (string, error) {
+	host, err := fs.resolveHostForCreate(path)
+	if err != nil {
+		return "", err
+	}
+
+	jailPath := fs.GetJail()
+	if strings.TrimSpace(jailPath) == "" {
+		return host, nil
+	}
+
+	info, statErr := os.Lstat(host)
+	if statErr != nil {
+		// Final does not exist (or stat failed): create-mode is fine, parent
+		// canonicalization already enforced the jail. Return as-is.
+		return host, nil
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		// Regular file or dir: no final-component follow happens at the OS
+		// level beyond the parent (which is already canonical). Safe.
+		return host, nil
+	}
+
+	// Final is a symlink and the operation will follow it. EvalSymlinks the
+	// full host path and re-check IsInJail.
+	canonicalJail := jailPath
+	if evaledJail, evalErr := filepath.EvalSymlinks(jailPath); evalErr == nil {
+		canonicalJail = evaledJail
+	}
+
+	resolvedHost, err := filepath.EvalSymlinks(host)
+	if err != nil {
+		return "", err
+	}
+	if !jail.IsInJail(canonicalJail, resolvedHost) {
+		return "", fmt.Errorf("resolve path outside jail %s: %w", resolvedHost, jail.ErrEscapeAttempt)
+	}
+	return resolvedHost, nil
 }
 
 func (fs *OsFS) resolveVirtual(path string, followSymlinks bool) (string, error) {
@@ -409,6 +641,29 @@ func (fs *OsFS) resolveVirtual(path string, followSymlinks bool) (string, error)
 		return "", fmt.Errorf("resolve path outside jail %s: %w", resolvedHost, jail.ErrEscapeAttempt)
 	}
 	return filepath.Clean(jail.RemoveJailPrefix(canonicalJail, resolvedHost)), nil
+}
+
+// globLiteralPrefix returns the longest leading path segment of pattern that
+// contains no glob meta-characters (*, ?, [, \). This is the directory
+// prefix filepath.Glob will traverse before matching. Returns "" if the very
+// first segment contains a meta-character.
+func globLiteralPrefix(pattern string) string {
+	// Walk the pattern and stop at the first meta-character; trim back to the
+	// last separator to get a clean directory prefix. If no meta-character
+	// is found, the whole pattern is literal — return its parent (the dir
+	// portion) so callers consistently get a directory path.
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '*', '?', '[', '\\':
+			// Trim back to the last separator before i.
+			j := strings.LastIndex(pattern[:i], string(filepath.Separator))
+			if j < 0 {
+				return ""
+			}
+			return pattern[:j]
+		}
+	}
+	return filepath.Dir(pattern)
 }
 
 func (fs *OsFS) hostPath(path string) string {

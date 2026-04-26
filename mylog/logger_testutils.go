@@ -131,8 +131,8 @@ func (h *TestHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	copy(newAttrs, h.attrs)
 	copy(newAttrs[len(h.attrs):], attrs)
 	return &TestHandler{
-		T:     h.T,
-		attrs: newAttrs,
+		T:      h.T,
+		attrs:  newAttrs,
 		parent: h,
 	}
 }
@@ -142,8 +142,8 @@ func (h *TestHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 // original handler.
 func (h *TestHandler) WithGroup(_ string) slog.Handler {
 	return &TestHandler{
-		T:     h.T,
-		attrs: h.attrs,
+		T:      h.T,
+		attrs:  h.attrs,
 		parent: h,
 	}
 }
