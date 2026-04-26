@@ -3,7 +3,9 @@ package toolkit_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/jlrickert/cli-toolkit/toolkit"
 	"github.com/stretchr/testify/assert"
@@ -542,4 +544,293 @@ func TestRuntime_OpenFile_ThroughRuntime(t *testing.T) {
 	data, err := rt.ReadFile("output.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "via runtime", string(data))
+}
+
+func TestOsFS_Chmod_ChangesMode(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.WriteFile(rootedPath("file.txt"), []byte("hello"), 0o644))
+
+	require.NoError(t, fs.Chmod(rootedPath("file.txt"), 0o600))
+
+	info, err := fs.Stat(rootedPath("file.txt"), false)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode()&os.ModePerm)
+}
+
+func TestOsFS_Chmod_MissingPath_Error(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	err = fs.Chmod(rootedPath("does-not-exist"), 0o600)
+	require.Error(t, err)
+}
+
+func TestOsFS_Chmod_JailEnforcement(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	outside := t.TempDir()
+
+	// Pre-create a file outside the jail with a known mode so we can detect
+	// whether Chmod escapes the jail via a symlink.
+	outsideFile := filepath.Join(outside, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0o644))
+
+	// Create a symlink inside the jail that points outside.
+	if err := os.Symlink(outsideFile, filepath.Join(jail, "escape-link")); err != nil {
+		t.Skipf("skipping symlink test: symlink creation unavailable: %v", err)
+	}
+
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	// Calling Chmod through the in-jail symlink must be rejected: os.Chmod
+	// follows symlinks at the OS level, so a lexical-only jail check would
+	// allow mutation of the outside target. resolveHost(path, true) runs
+	// EvalSymlinks and re-checks IsInJail on the resolved path.
+	err = fs.Chmod(rootedPath("escape-link"), 0o000)
+	require.Error(t, err)
+	require.ErrorIs(t, err, toolkit.ErrEscapeAttempt)
+
+	// Defense-in-depth: confirm the outside file's mode is unchanged.
+	outsideInfo, err := os.Lstat(outsideFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o644), outsideInfo.Mode()&os.ModePerm)
+}
+
+func TestOsFS_Chown_JailEnforcement(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("chown is a no-op on Windows; skipping")
+	}
+
+	jail := t.TempDir()
+	outside := t.TempDir()
+
+	outsideFile := filepath.Join(outside, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0o644))
+
+	if err := os.Symlink(outsideFile, filepath.Join(jail, "escape-link")); err != nil {
+		t.Skipf("skipping symlink test: symlink creation unavailable: %v", err)
+	}
+
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	// Same shape as the Chmod escape test: os.Chown follows symlinks, so the
+	// resolveHost call must use followSymlinks=true to detect the escape.
+	err = fs.Chown(rootedPath("escape-link"), os.Geteuid(), os.Getegid())
+	require.Error(t, err)
+	require.ErrorIs(t, err, toolkit.ErrEscapeAttempt)
+}
+
+func TestOsFS_Chtimes_JailEnforcement(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	outside := t.TempDir()
+
+	outsideFile := filepath.Join(outside, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0o644))
+
+	// Capture the outside file's mtime before the attempted escape so we can
+	// confirm Chtimes did not in fact mutate it.
+	beforeInfo, err := os.Lstat(outsideFile)
+	require.NoError(t, err)
+	beforeMtime := beforeInfo.ModTime()
+
+	if err := os.Symlink(outsideFile, filepath.Join(jail, "escape-link")); err != nil {
+		t.Skipf("skipping symlink test: symlink creation unavailable: %v", err)
+	}
+
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	// Pick a sentinel time well away from "now" so any successful escape
+	// would be obvious in the post-condition check.
+	sentinel := time.Date(1999, time.January, 2, 3, 4, 5, 0, time.UTC)
+	err = fs.Chtimes(rootedPath("escape-link"), sentinel, sentinel)
+	require.Error(t, err)
+	require.ErrorIs(t, err, toolkit.ErrEscapeAttempt)
+
+	// Defense-in-depth: confirm the outside file's mtime is unchanged. Use a
+	// small tolerance to absorb any filesystem-level mtime granularity.
+	afterInfo, err := os.Lstat(outsideFile)
+	require.NoError(t, err)
+	assert.WithinDuration(t, beforeMtime, afterInfo.ModTime(), time.Second)
+}
+
+func TestOsFS_Stat_JailEnforcement_FollowSymlinks(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	outside := t.TempDir()
+
+	outsideFile := filepath.Join(outside, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0o644))
+
+	if err := os.Symlink(outsideFile, filepath.Join(jail, "escape-link")); err != nil {
+		t.Skipf("skipping symlink test: symlink creation unavailable: %v", err)
+	}
+
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	// Stat with followSymlinks=true must not leak FileInfo about a target
+	// outside the jail. resolveHost(path, true) runs EvalSymlinks and
+	// re-checks IsInJail on the resolved path.
+	_, err = fs.Stat(rootedPath("escape-link"), true)
+	require.Error(t, err)
+	require.ErrorIs(t, err, toolkit.ErrEscapeAttempt)
+
+	// followSymlinks=false (Lstat) must still succeed: the symlink inode
+	// itself is in the jail, and Lstat does not follow it.
+	info, err := fs.Stat(rootedPath("escape-link"), false)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "expected escape-link to be a symlink")
+}
+
+func TestOsFS_Chtimes_MissingPath_Error(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	err = fs.Chtimes(rootedPath("does-not-exist"), time.Now(), time.Now())
+	require.Error(t, err)
+}
+
+func TestOsFS_Chtimes_UpdatesTimes(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.WriteFile(rootedPath("file.txt"), []byte("hello"), 0o644))
+
+	want := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	require.NoError(t, fs.Chtimes(rootedPath("file.txt"), want, want))
+
+	info, err := fs.Stat(rootedPath("file.txt"), false)
+	require.NoError(t, err)
+	assert.WithinDuration(t, want, info.ModTime(), time.Second)
+}
+
+func TestOsFS_Chown_NoOp_OnSelfUidGid(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("chown is a no-op on Windows; skipping")
+	}
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.WriteFile(rootedPath("file.txt"), []byte("hello"), 0o644))
+
+	require.NoError(t, fs.Chown(rootedPath("file.txt"), os.Geteuid(), os.Getegid()))
+}
+
+func TestOsFS_Lchown_OnSymlink_DoesNotFollow(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("lchown is a no-op on Windows; skipping")
+	}
+
+	jail := t.TempDir()
+	fs, err := toolkit.NewOsFS(jail, rootedPath())
+	require.NoError(t, err)
+
+	require.NoError(t, fs.WriteFile(rootedPath("target.txt"), []byte("target"), 0o644))
+
+	if err := fs.Symlink(rootedPath("target.txt"), rootedPath("link")); err != nil {
+		t.Skipf("skipping lchown test: symlink creation unavailable: %v", err)
+	}
+
+	require.NoError(t, fs.Lchown(rootedPath("link"), os.Geteuid(), os.Getegid()))
+
+	// Lstat on the symlink itself should succeed and report a symlink mode,
+	// confirming the operation acted on the link rather than its target.
+	info, err := fs.Stat(rootedPath("link"), false)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "expected link path to be a symlink")
+}
+
+func TestRuntime_Chmod_ThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	rt, err := toolkit.NewTestRuntime(jail, filepath.Join("/home", "testuser"), "testuser")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.WriteFile("file.txt", []byte("hello"), 0o644))
+
+	require.NoError(t, rt.Chmod("file.txt", 0o600))
+
+	info, err := rt.Stat("file.txt", false)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode()&os.ModePerm)
+}
+
+func TestRuntime_Chtimes_ThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	jail := t.TempDir()
+	rt, err := toolkit.NewTestRuntime(jail, filepath.Join("/home", "testuser"), "testuser")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.WriteFile("file.txt", []byte("hello"), 0o644))
+
+	want := time.Date(2002, time.March, 4, 5, 6, 7, 0, time.UTC)
+	require.NoError(t, rt.Chtimes("file.txt", want, want))
+
+	info, err := rt.Stat("file.txt", false)
+	require.NoError(t, err)
+	assert.WithinDuration(t, want, info.ModTime(), time.Second)
+}
+
+func TestRuntime_Chown_ThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("chown is a no-op on Windows; skipping")
+	}
+
+	jail := t.TempDir()
+	rt, err := toolkit.NewTestRuntime(jail, filepath.Join("/home", "testuser"), "testuser")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.WriteFile("file.txt", []byte("hello"), 0o644))
+
+	require.NoError(t, rt.Chown("file.txt", os.Geteuid(), os.Getegid()))
+}
+
+func TestRuntime_Lchown_ThroughRuntime(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("lchown is a no-op on Windows; skipping")
+	}
+
+	jail := t.TempDir()
+	rt, err := toolkit.NewTestRuntime(jail, filepath.Join("/home", "testuser"), "testuser")
+	require.NoError(t, err)
+
+	require.NoError(t, rt.WriteFile("target.txt", []byte("target"), 0o644))
+	require.NoError(t, rt.Symlink("target.txt", "link"))
+
+	require.NoError(t, rt.Lchown("link", os.Geteuid(), os.Getegid()))
 }

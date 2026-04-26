@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jlrickert/cli-toolkit/clock"
 	"github.com/jlrickert/cli-toolkit/mylog"
@@ -18,12 +19,12 @@ import (
 // Context values are not used for mutable runtime dependencies; callers pass a
 // Runtime directly.
 type Runtime struct {
-	env    Env
-	fs     FileSystem
-	clock  clock.SchedulingClock
-	logger *slog.Logger
-	stream *Stream
-	hasher Hasher
+	env     Env
+	fs      FileSystem
+	clock   clock.SchedulingClock
+	logger  *slog.Logger
+	stream  *Stream
+	hasher  Hasher
 	process *ProcessInfo
 
 	// jail and wd are canonical state managed by Runtime and applied to both
@@ -708,6 +709,50 @@ func (rt *Runtime) Symlink(oldName, newName string) error {
 		return err
 	}
 	return rt.fs.Symlink(oldPath, newPath)
+}
+
+func (rt *Runtime) Chmod(rel string, mode os.FileMode) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return err
+	}
+	return rt.fs.Chmod(path, mode)
+}
+
+func (rt *Runtime) Chown(rel string, uid, gid int) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return err
+	}
+	return rt.fs.Chown(path, uid, gid)
+}
+
+func (rt *Runtime) Lchown(rel string, uid, gid int) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return err
+	}
+	return rt.fs.Lchown(path, uid, gid)
+}
+
+func (rt *Runtime) Chtimes(rel string, atime, mtime time.Time) error {
+	if err := rt.Validate(); err != nil {
+		return err
+	}
+	path, err := rt.ResolvePath(rel, false)
+	if err != nil {
+		return err
+	}
+	return rt.fs.Chtimes(path, atime, mtime)
 }
 
 func (rt *Runtime) Glob(pattern string) ([]string, error) {

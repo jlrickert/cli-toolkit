@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jlrickert/cli-toolkit/toolkit/jail"
 )
@@ -52,6 +53,24 @@ type FileSystem interface {
 	// returning an io.WriteCloser. Callers must close the returned writer.
 	// Relative paths are resolved from the current working directory.
 	OpenFile(path string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	// Chmod changes the mode of the file at path to mode.
+	// Relative paths are resolved from the current working directory.
+	// On Windows only the read-only bit is honored, matching the
+	// behavior of WriteFile's perm argument.
+	Chmod(path string, mode os.FileMode) error
+	// Chown changes the numeric uid and gid of the file at path.
+	// Relative paths are resolved from the current working directory.
+	// On Windows this is a no-op.
+	Chown(path string, uid, gid int) error
+	// Lchown is like Chown but does not follow symlinks.
+	// Relative paths are resolved from the current working directory.
+	// On Windows this is a no-op.
+	Lchown(path string, uid, gid int) error
+	// Chtimes changes the access and modification times of the file at path.
+	// Relative paths are resolved from the current working directory.
+	// On Windows the resolution of access time is filesystem-dependent
+	// (e.g. FAT32 truncates to 2-second granularity).
+	Chtimes(path string, atime, mtime time.Time) error
 	// AtomicWriteFile writes data to path atomically with the provided permissions.
 	// Relative paths are resolved from the current working directory.
 	AtomicWriteFile(path string, data []byte, perm os.FileMode) error

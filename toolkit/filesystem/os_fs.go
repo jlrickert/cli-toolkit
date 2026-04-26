@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jlrickert/cli-toolkit/toolkit/jail"
 )
@@ -174,7 +175,13 @@ func (fs *OsFS) Rename(src, dst string) error {
 }
 
 func (fs *OsFS) Stat(path string, followSymlinks bool) (os.FileInfo, error) {
-	host, err := fs.resolveHost(path, false)
+	// Pass followSymlinks through to resolveHost so the jail check runs
+	// EvalSymlinks and re-checks IsInJail when the caller wants follow
+	// semantics. Without this, an in-jail symlink to an outside target would
+	// pass the lexical jail check and os.Stat would leak the target's
+	// FileInfo. The followSymlinks=false path keeps lexical-only resolution
+	// because os.Lstat does not follow symlinks at the OS level.
+	host, err := fs.resolveHost(path, followSymlinks)
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +275,49 @@ func (fs *OsFS) OpenFile(path string, flag int, perm os.FileMode) (io.WriteClose
 	return os.OpenFile(host, flag, perm)
 }
 
+func (fs *OsFS) Chmod(path string, mode os.FileMode) error {
+	// Resolve with followSymlinks=true so resolveVirtual runs EvalSymlinks
+	// and re-checks the resolved path against the jail. os.Chmod follows
+	// symlinks at the OS level, so a lexical-only check would let a symlink
+	// inside the jail mutate a target outside it.
+	host, err := fs.resolveHost(path, true)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(host, mode)
+}
+
+func (fs *OsFS) Chown(path string, uid, gid int) error {
+	// See Chmod: os.Chown follows symlinks, so the jail check must be
+	// symlink-aware to prevent escape via an in-jail link to an outside file.
+	host, err := fs.resolveHost(path, true)
+	if err != nil {
+		return err
+	}
+	return os.Chown(host, uid, gid)
+}
+
+func (fs *OsFS) Lchown(path string, uid, gid int) error {
+	// os.Lchown does NOT follow symlinks (POSIX), so a lexical jail check is
+	// sufficient: the operation acts on the symlink inode itself, never its
+	// target. Keeping followSymlinks=false here is intentional and required.
+	host, err := fs.resolveHost(path, false)
+	if err != nil {
+		return err
+	}
+	return os.Lchown(host, uid, gid)
+}
+
+func (fs *OsFS) Chtimes(path string, atime, mtime time.Time) error {
+	// See Chmod: os.Chtimes follows symlinks, so the jail check must be
+	// symlink-aware to prevent escape via an in-jail link to an outside file.
+	host, err := fs.resolveHost(path, true)
+	if err != nil {
+		return err
+	}
+	return os.Chtimes(host, atime, mtime)
+}
+
 func (fs *OsFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	host, err := fs.resolveHost(path, false)
 	if err != nil {
@@ -342,10 +392,23 @@ func (fs *OsFS) resolveVirtual(path string, followSymlinks bool) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if !jail.IsInJail(jailPath, resolvedHost) {
+
+	// Canonicalize the jail prefix so the IsInJail comparison is meaningful
+	// after EvalSymlinks. On systems where the jail's parent contains
+	// symlinks (e.g. macOS where /var -> /private/var), the resolved host
+	// path is in canonical form while the stored jailPath is not, and a
+	// raw prefix comparison would falsely flag legitimate paths as escapes.
+	// Fall back to the raw jailPath if EvalSymlinks fails (jail may not yet
+	// exist at construction time).
+	canonicalJail := jailPath
+	if evaledJail, evalErr := filepath.EvalSymlinks(jailPath); evalErr == nil {
+		canonicalJail = evaledJail
+	}
+
+	if !jail.IsInJail(canonicalJail, resolvedHost) {
 		return "", fmt.Errorf("resolve path outside jail %s: %w", resolvedHost, jail.ErrEscapeAttempt)
 	}
-	return filepath.Clean(jail.RemoveJailPrefix(jailPath, resolvedHost)), nil
+	return filepath.Clean(jail.RemoveJailPrefix(canonicalJail, resolvedHost)), nil
 }
 
 func (fs *OsFS) hostPath(path string) string {
