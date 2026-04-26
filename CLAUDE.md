@@ -18,8 +18,12 @@ go test ./toolkit -run TestEnvGet -v
 # Build/check code
 go build ./...
 
-# Release process (tags and updates changelog)
-task release
+# Inspect what the next release would publish (dry run; actual
+# release runs via GitHub Actions: .github/workflows/release.yml)
+task release:dry-run
+
+# Trigger the actual release (requires gh CLI auth)
+gh workflow run release.yml
 ```
 
 ## Project Overview
@@ -100,12 +104,14 @@ The library provides three layers of test utilities:
 
 1. **Unit Testing**: Use `Sandbox` for basic setup with logger, env, clock,
    hasher, and jailed filesystem.
+
    ```go
    sb := sandbox.NewSandbox(t, nil, sandbox.WithEnv("DEBUG", "true"))
    ctx := sb.Context()
    ```
 
 2. **Process Isolation**: Use `Process` to run a function with configurable I/O.
+
    ```go
    p := sandbox.NewProcess(myRunner, false)
    result := p.Run(ctx)

@@ -1,5 +1,7 @@
 # cli-toolkit - Helpers for CLI programs and unit tests
 
+[![CI](https://github.com/jlrickert/cli-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jlrickert/cli-toolkit/actions/workflows/ci.yml)
+
 Small, focused helpers for command line programs and tests. The library provides
 testable abstractions for environment handling, time, file system operations,
 logging, hashing, and common user paths.
