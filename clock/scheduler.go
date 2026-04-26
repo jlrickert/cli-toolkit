@@ -11,9 +11,9 @@ import (
 type entryKind int
 
 const (
-	kindTicker   entryKind = iota // repeating ticker
-	kindAfterFunc                 // one-shot callback
-	kindAfter                     // one-shot channel send (After)
+	kindTicker    entryKind = iota // repeating ticker
+	kindAfterFunc                  // one-shot callback
+	kindAfter                      // one-shot channel send (After)
 )
 
 // tickerState holds shared mutable state for a ticker across all its
@@ -51,8 +51,8 @@ type schedEntry struct {
 	ticker *tickerState
 
 	// --- AfterFunc / After fields ---
-	fn      func()        // AfterFunc callback (nil for kindAfter)
-	afterC  chan time.Time // After result channel (nil for kindAfterFunc)
+	fn     func()         // AfterFunc callback (nil for kindAfter)
+	afterC chan time.Time // After result channel (nil for kindAfterFunc)
 }
 
 // schedHeap is a min-heap of *schedEntry ordered by (deadline, id).
@@ -187,7 +187,7 @@ func (s *scheduler) addAfter(d time.Duration) *schedEntry {
 		deadline: s.now.Add(d),
 		id:       s.allocID(),
 		kind:     kindAfter,
-		afterC:  make(chan time.Time, 1),
+		afterC:   make(chan time.Time, 1),
 	}
 	heap.Push(&s.entries, e)
 	return e
