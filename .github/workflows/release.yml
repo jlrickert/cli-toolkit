@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. v1.6.0). Leave empty to auto-detect via git-cliff."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Ensure tags
+        run: git fetch --force --tags
+
+      - name: Determine version via git-cliff
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --bumped-version
+
+      - name: Resolve release version
+        id: version
+        env:
+          OVERRIDE: ${{ inputs.version }}
+          CLIFF_OUT: ${{ steps.cliff.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Latest semver tag, if any. Empty when the repo has no v* tags yet.
+          LATEST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n1 || true)"
+
+          # Trim cliff output. When no version-bumping commits exist since the
+          # last tag, git-cliff --bumped-version returns the EXISTING latest tag
+          # (cli-toolkit's reported bug). We treat that case as "cliff empty"
+          # and fall back to a patch bump.
+          CLIFF_TRIMMED="$(printf '%s' "${CLIFF_OUT:-}" | tr -d '[:space:]')"
+          if [ -n "$CLIFF_TRIMMED" ] && [ -n "$LATEST_TAG" ] && [ "$CLIFF_TRIMMED" = "$LATEST_TAG" ]; then
+            CLIFF_TRIMMED=""
+          fi
+
+          # Override path: caller supplied an explicit version. Validate against
+          # cliff's recommendation and refuse to silently disagree.
+          OVERRIDE_TRIMMED="$(printf '%s' "${OVERRIDE:-}" | tr -d '[:space:]')"
+          if [ -n "$OVERRIDE_TRIMMED" ]; then
+            case "$OVERRIDE_TRIMMED" in
+              v[0-9]*.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::Override version '$OVERRIDE_TRIMMED' is not semver vMAJOR.MINOR.PATCH" >&2
+                exit 1
+                ;;
+            esac
+            if [ -n "$CLIFF_TRIMMED" ] && [ "$CLIFF_TRIMMED" != "$OVERRIDE_TRIMMED" ]; then
+              echo "::warning::Override '$OVERRIDE_TRIMMED' differs from cliff suggestion '$CLIFF_TRIMMED'. Using override."
+            fi
+            VERSION="$OVERRIDE_TRIMMED"
+          elif [ -n "$CLIFF_TRIMMED" ]; then
+            VERSION="$CLIFF_TRIMMED"
+          elif [ -n "$LATEST_TAG" ]; then
+            # Fallback: patch-bump from the latest tag. Strip leading 'v' and
+            # bump the third component.
+            BASE="${LATEST_TAG#v}"
+            MAJOR="${BASE%%.*}"
+            REST="${BASE#*.}"
+            MINOR="${REST%%.*}"
+            PATCH="${REST#*.}"
+            case "$MAJOR$MINOR$PATCH" in
+              *[!0-9]*)
+                echo "::error::Latest tag '$LATEST_TAG' is not semver; cannot auto-bump" >&2
+                exit 1
+                ;;
+            esac
+            VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            echo "::notice::cliff returned no new version; patch-bumping from $LATEST_TAG to $VERSION"
+          else
+            echo "::error::No prior tag and no override; cannot determine release version" >&2
+            exit 1
+          fi
+
+          # Tag-exists guard: refuse to clobber an existing tag.
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION already exists; aborting" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved release version: $VERSION"
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ steps.version.outputs.version }} -o CHANGELOG.md
+
+      - name: Commit changelog and tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit"
+          else
+            git commit -m "docs(release): update changelog for $VERSION"
+          fi
+          git tag -a "$VERSION" -m "$VERSION"
+          git push origin HEAD:main --follow-tags
+
+      - name: Trigger pkg.go.dev indexing
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Best-effort proxy.golang.org ping to force module indexing. Failure
+          # is non-fatal; the module proxy will index lazily on first request.
+          curl -fsS "https://proxy.golang.org/github.com/jlrickert/cli-toolkit/@v/${VERSION}.info" \
+            || echo "indexing ping failed; module will index lazily"

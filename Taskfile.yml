@@ -8,13 +8,14 @@ tasks:
     sources:
       - ./**/*.go
     silent: true
-  release:
+  release:dry-run:
+    desc: "Show what would be released. The actual release runs via GitHub Actions (.github/workflows/release.yml)."
     cmds:
-      - echo "Running tests..."
-      - go test ./...
-      - git-cliff --output CHANGELOG.md --tag $(git-cliff --bumped-version)
-      - git add CHANGELOG.md
-      - 'git commit -m "docs(release): update changelog for $(git-cliff --bumped-version)"'
-      - git tag $(git-cliff --bumped-version)
-      - git push origin HEAD --tags
-      - echo "Release process complete"
+      - |
+        echo "Latest tag:    $(git tag --list 'v*' --sort=-version:refname | head -n1)"
+        echo "Current HEAD:  $(git rev-parse --short HEAD)"
+        echo "Bumped version (cliff): $(git-cliff --bumped-version 2>/dev/null || echo 'unavailable')"
+        echo
+        echo "To release: trigger the Release workflow on GitHub."
+        echo "  gh workflow run release.yml"
+    silent: true
