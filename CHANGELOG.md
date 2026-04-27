@@ -1,8 +1,14 @@
-## [1.5.0] - 2026-04-15
+## [1.5.1] - 2026-04-27
 
 ### 🚀 Features
 
 - Add scheduling primitives to clock abstraction
+- *(runtime)* Add Chmod, Chown, Lchown, Chtimes to FileSystem and Runtime
+- *(filesystem)* Close parent-traversal and final-symlink escapes in OsFS
+
+### 📚 Documentation
+
+- *(release)* Update changelog for v1.5.0
 ## [1.4.0] - 2026-03-27
 
 ### 🚀 Features
