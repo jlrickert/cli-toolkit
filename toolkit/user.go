@@ -122,19 +122,27 @@ func UserStatePath(env Env) (string, error) {
 var DefaultEditor = "nano"
 
 // Edit launches the user's editor to edit the provided file path.
+//
+// The two-call form (ResolvePath(_, true) followed by HostPath) is intentional
+// and pinned by TestEdit_UsesRuntimeAndResolvesSymlinkPath; do not consolidate.
 func Edit(ctx context.Context, rt *Runtime, path string) error {
 	if path == "" {
 		return fmt.Errorf("empty filepath")
 	}
 
-	resolvedPath, err := rt.ResolvePath(path, true)
+	// Follow symlinks at the virtual layer so editors are pointed at the
+	// real file behind any in-jail symlink (matches the prior behavior
+	// pinned by TestEdit_UsesRuntimeAndResolvesSymlinkPath). HostPath then
+	// translates the canonicalized virtual path to its host form,
+	// applying jail-prefix canonicalization (e.g. macOS /var ->
+	// /private/var) so the editor receives the real on-disk path.
+	resolvedVirtual, err := rt.ResolvePath(path, true)
 	if err != nil {
 		return fmt.Errorf("resolve edit path: %w", err)
 	}
-	editorPath := resolvedPath
-	if jail := strings.TrimSpace(rt.GetJail()); jail != "" {
-		trimmed := strings.TrimPrefix(resolvedPath, string(filepath.Separator))
-		editorPath = filepath.Join(jail, trimmed)
+	editorPath, err := rt.HostPath(resolvedVirtual)
+	if err != nil {
+		return fmt.Errorf("resolve edit path: %w", err)
 	}
 
 	editor := rt.Get("VISUAL")
