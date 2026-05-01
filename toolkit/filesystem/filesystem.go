@@ -85,6 +85,29 @@ type FileSystem interface {
 	// ResolvePath resolves path to an absolute normalized path, optionally following symlinks.
 	// Relative paths are resolved from the current working directory.
 	ResolvePath(path string, followSymlinks bool) (string, error)
+	// HostPath translates a virtual (jail-relative) path into the
+	// equivalent absolute host filesystem path that an external program
+	// (subprocess, editor, etc.) needs to operate on.
+	//
+	// Implementations canonicalize the jail prefix via filepath.EvalSymlinks
+	// before joining so platform-level symlinks (e.g. macOS /var ->
+	// /private/var) do not produce phantom escapes when callers later
+	// re-canonicalize the returned path. Implementations do NOT
+	// canonicalize intermediate symlinks in the virtual path; callers
+	// that need parent-traversal-symlink defense should resolve the
+	// path through ResolvePath(_, true) first.
+	//
+	// HostPath is the public surface of the in-tree host-translation
+	// helper used by the FileSystem implementation itself. It is
+	// intended for callers that need to hand a host path to code outside
+	// the FileSystem abstraction (e.g. exec.Command).
+	//
+	// The input may be absolute (treated as virtual when a jail is
+	// configured) or relative (resolved against the current working
+	// directory). Returns [jail.ErrEscapeAttempt] when the lexical jail
+	// check rejects the resulting path. When no jail is configured, the
+	// cleaned absolute host path is returned unchanged.
+	HostPath(virtual string) (string, error)
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {

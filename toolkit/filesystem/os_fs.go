@@ -674,4 +674,54 @@ func (fs *OsFS) hostPath(path string) string {
 	return filepath.Clean(filepath.Join(jailPath, path))
 }
 
+// HostPath returns the absolute host filesystem path corresponding to a
+// virtual (jail-relative) path. It is the public surface of the in-tree
+// resolveHost translation used internally by FileSystem methods, intended
+// for callers that need to hand a host path to code outside the FileSystem
+// abstraction (e.g. exec.CommandContext).
+//
+// Semantics (option 2b — canonicalizing):
+//
+//  1. Resolve the input lexically through resolveVirtual with
+//     followSymlinks=false. This applies the working directory for
+//     relative inputs and re-checks IsInJail on the lexical jail join,
+//     returning [jail.ErrEscapeAttempt] for parent-traversal attempts.
+//  2. When a jail is configured, canonicalize the jail prefix via
+//     filepath.EvalSymlinks. On macOS, /var resolves to /private/var; on
+//     Linux, jail directories created under /tmp on certain distros may
+//     resolve through symlinks too. Without this canonicalization,
+//     downstream consumers that re-canonicalize the returned path would
+//     see a different prefix and falsely flag the path as outside the
+//     jail. Falls back to the raw jail when EvalSymlinks fails (e.g. the
+//     jail does not yet exist), matching resolveHostForCreate.
+//  3. Join the canonical jail with the cleaned virtual path and return
+//     the result. The final segment is intentionally NOT EvalSymlinks'd
+//     — callers may pass paths whose final component does not yet exist
+//     (e.g. files about to be created by an editor).
+//
+// Returns [jail.ErrEscapeAttempt] when the virtual path would resolve
+// outside the configured jail. When no jail is configured, returns the
+// cleaned absolute host path unchanged.
+func (fs *OsFS) HostPath(virtual string) (string, error) {
+	resolved, err := fs.resolveVirtual(virtual, false)
+	if err != nil {
+		return "", err
+	}
+
+	jailPath := fs.GetJail()
+	if strings.TrimSpace(jailPath) == "" {
+		return filepath.Clean(resolved), nil
+	}
+
+	// Canonicalize the jail prefix. Falling back to the raw jail keeps
+	// the contract usable when the jail directory has not yet been
+	// created on disk (matches resolveHostForCreate at lines 466-470).
+	canonicalJail := jailPath
+	if evaledJail, evalErr := filepath.EvalSymlinks(jailPath); evalErr == nil {
+		canonicalJail = evaledJail
+	}
+
+	return filepath.Clean(filepath.Join(canonicalJail, resolved)), nil
+}
+
 var _ FileSystem = (*OsFS)(nil)

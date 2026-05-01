@@ -824,5 +824,52 @@ func (rt *Runtime) Rel(basePath, targetPath string) (string, error) {
 	return rt.fs.Rel(baseResolved, targetResolved)
 }
 
+// HostPath translates a caller-supplied virtual path into the absolute
+// host filesystem path that an external program (subprocess, editor)
+// must be invoked against.
+//
+// Input is run through the same expansion chain as other Runtime
+// forwarders so callers may pass tilde-prefixed (~/foo), env-variable
+// ($HOME/foo), or relative paths and get the same result they would
+// from ReadFile or Stat. The expanded virtual path is then handed to
+// FS().HostPath, which canonicalizes the jail prefix (see
+// [filesystem.OsFS.HostPath]) and joins it with the cleaned virtual.
+//
+// Returns [jail.ErrEscapeAttempt] when the path would resolve outside
+// the configured jail. With no jail configured, returns the cleaned
+// absolute host path.
+func (rt *Runtime) HostPath(rel string) (string, error) {
+	if err := rt.Validate(); err != nil {
+		return "", err
+	}
+
+	// Empty input is treated like "." in other forwarders: resolve to
+	// the current working directory's host equivalent.
+	var virtual string
+	if strings.TrimSpace(rel) == "" || rel == "." {
+		cwd, err := rt.Getwd()
+		if err != nil {
+			return "", err
+		}
+		virtual = cwd
+	} else {
+		expanded := ExpandEnv(rt, rel)
+		parsed, err := ExpandPath(rt, expanded)
+		if err != nil {
+			return "", err
+		}
+		virtual = parsed
+		if !filepath.IsAbs(virtual) {
+			cwd, err := rt.Getwd()
+			if err != nil {
+				return "", err
+			}
+			virtual = filepath.Join(cwd, virtual)
+		}
+	}
+
+	return rt.fs.HostPath(filepath.Clean(virtual))
+}
+
 var _ Env = (*Runtime)(nil)
 var _ FileSystem = (*Runtime)(nil)

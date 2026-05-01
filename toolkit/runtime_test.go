@@ -248,3 +248,64 @@ func TestNewRuntime_NilOptionSkipped(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, rt)
 }
+
+func TestRuntime_HostPath_TildeExpansion(t *testing.T) {
+	t.Parallel()
+
+	jailDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	rt, err := toolkit.NewTestRuntime(jailDir, "/home/alice", "alice")
+	require.NoError(t, err)
+
+	got, err := rt.HostPath("~/notes/keg")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(jailDir, "home", "alice", "notes", "keg"), got)
+}
+
+func TestRuntime_HostPath_EnvVarExpansion(t *testing.T) {
+	t.Parallel()
+
+	jailDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	rt, err := toolkit.NewTestRuntime(jailDir, "/home/alice", "alice")
+	require.NoError(t, err)
+	require.NoError(t, rt.Set("KEG_ROOT", "/home/alice/notes"))
+
+	got, err := rt.HostPath("$KEG_ROOT/keg")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(jailDir, "home", "alice", "notes", "keg"), got)
+}
+
+func TestRuntime_HostPath_AbsoluteVirtualPath(t *testing.T) {
+	t.Parallel()
+
+	jailDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	rt, err := toolkit.NewTestRuntime(jailDir, "/home/alice", "alice")
+	require.NoError(t, err)
+
+	got, err := rt.HostPath("/etc/config")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(jailDir, "etc", "config"), got)
+}
+
+func TestRuntime_HostPath_NoJail(t *testing.T) {
+	t.Parallel()
+
+	// No jail: HostPath should return the cleaned absolute host path.
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	rt, err := toolkit.NewRuntime(
+		toolkit.WithRuntimeFileSystem(&toolkit.OsFS{}),
+	)
+	require.NoError(t, err)
+
+	abs := filepath.Join(cwd, "some", "file.txt")
+	got, err := rt.HostPath(abs)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(abs), got)
+}
