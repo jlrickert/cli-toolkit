@@ -1,3 +1,8 @@
+## [1.5.2] - 2026-05-26
+
+### 🚀 Features
+
+- *(runtime)* Add HostPath for jail-aware host path translation
 ## [1.5.1] - 2026-04-27
 
 ### 🚀 Features
@@ -9,6 +14,7 @@
 ### 📚 Documentation
 
 - *(release)* Update changelog for v1.5.0
+- *(release)* Update changelog for v1.5.1
 ## [1.4.0] - 2026-03-27
 
 ### 🚀 Features
